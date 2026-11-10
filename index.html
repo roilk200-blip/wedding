@@ -276,12 +276,12 @@ body{margin:0}
 <script type="module" src="platform.js"></script>
 <script type="module">
 (function(){
-const TABS=[['overview','סקירה'],['venues','אולמות'],['tasks','משימות'],['budget','תקציב'],['extras','הוצאות נלוות'],['guests','מוזמנים'],['gifts','מתנות'],['vendors','ספקים']];
-const S={settings:{},tasks:[],expenses:[],guests:[],vendors:[],venues:[],funders:[],gifts:[],meetings:[]};
-const COLLS=['settings','tasks','expenses','guests','vendors','venues','funders','gifts','meetings'];
+const TABS=[['overview','סקירה'],['venues','אולמות'],['tasks','משימות'],['budget','תקציב'],['extras','הוצאות נלוות'],['guests','מוזמנים'],['gifts','מתנות'],['vendors','ספקים'],['day','יום החתונה']];
+const S={settings:{},tasks:[],expenses:[],guests:[],vendors:[],venues:[],funders:[],gifts:[],meetings:[],timeline:[],activity:[]};
+const COLLS=['settings','tasks','expenses','guests','vendors','venues','funders','gifts','meetings','timeline','activity'];
 let assets=null;
 const ARCH={};
-const ARCHIVABLE=['tasks','expenses','guests','vendors','venues','funders','gifts','meetings'];
+const ARCHIVABLE=['tasks','expenses','guests','vendors','venues','funders','gifts','meetings','timeline'];
 let vendorType='all',costN=0,qSec=0;
 let venueView='cards',guestShow=100,giftFilter='all',giftQ='',saveAgain=false;
 try{const vv=localStorage.getItem('wed-vview');if(vv==='table'||vv==='cards'||vv==='answers')venueView=vv}catch(e){}
@@ -411,6 +411,12 @@ const SCH={
     {k:'duration',l:'משך',t:'select',o:()=>[['60','שעה'],['90','שעה וחצי'],['120','שעתיים'],['45','45 דקות']],d:'60'},
     {k:'invite',l:'זימון ביומן',t:'select',o:()=>[['yes','לזמן גם את '+names()[1]],['no','רק ביומן שלי']],d:'yes'},
     {k:'note',l:'מה לבדוק בפגישה',t:'textarea',wide:1}]},
+  timeline:{t:'שלב',f:[
+    {k:'time',l:'שעה',t:'time',req:1},
+    {k:'title',l:'מה קורה',t:'text',req:1,wide:1},
+    {k:'vendorId',l:'ספק אחראי',t:'select',o:()=>[['','ללא'],...S.vendors.filter(v=>v.status!=='out').map(v=>[v.id,(v.type?v.type.split(' / ')[0]+' · ':'')+v.name])],d:''},
+    {k:'place',l:'איפה',t:'text'},
+    {k:'note',l:'הערות',t:'textarea',wide:1}]},
   settings:{t:'הגדרות החתונה',f:[
     {k:'n1',l:'שם ראשון',t:'text',d:'רועי'},
     {k:'n2',l:'שם שני',t:'text'},
@@ -578,12 +584,12 @@ function render(){
   computeSchedule();
   renderHeader();renderTabs();
   const m=$('#main');
-  const need={venues:'venues',tasks:'tasks',budget:'expenses',extras:'expenses',guests:'guests',gifts:'gifts',vendors:'vendors'}[tab];
+  const need={venues:'venues',tasks:'tasks',budget:'expenses',extras:'expenses',guests:'guests',gifts:'gifts',vendors:'vendors',day:'timeline'}[tab];
   if(need&&!seen[need]&&dbState!=='none'){
     m.innerHTML=`<div class="empty"><strong>טוען נתונים…</strong><p>${dbState==='pending'?'מתחבר לאחסון המשותף.':'מושך את הנתונים העדכניים.'} אם זה לוקח יותר מכמה שניות, תופיע למעלה הודעה עם הסיבה.</p></div>`;
     return;
   }
-  const fn={overview:vOverview,venues:vVenues,tasks:vTasks,gifts:vGifts,budget:()=>vMoney(false),extras:()=>vMoney(true),guests:vGuests,vendors:vVendors}[tab];
+  const fn={overview:vOverview,venues:vVenues,tasks:vTasks,gifts:vGifts,budget:()=>vMoney(false),extras:()=>vMoney(true),guests:vGuests,vendors:vVendors,day:vDay}[tab];
   m.innerHTML=fn();
   if(tab==='guests')renderGuestList();
   if(tab==='gifts')renderGiftList();
@@ -662,7 +668,8 @@ function vOverview(){
       <div class="sec-head"><h2>תשלומים קרובים</h2><button class="btn small ghost" type="button" data-tab="budget">לתקציב</button></div>
       ${pays.length?`<ul class="upcoming">${pays.map(p=>{const d=parseD(p.date);return `<li><span class="w">${h(p.name)} <span class="num" style="color:var(--muted)">· ${fdate(p.date)}${p.method?' · '+h(lab(METHODS,p.method)):''}</span></span><span class="num ${d&&d<t0?'late':''}">${ils(p.amount)}</span></li>`}).join('')}</ul>`:'<p class="hint">אין תשלומים עם מועד שנקבע. הוסיפו לוח תשלומים להוצאה כדי שתופיע כאן.</p>'}
     </section>
-  </div>`;
+  </div>
+  ${activityCard()}`;
 }
 
 function taskRow(t,t0){
@@ -801,6 +808,7 @@ function vGuests(){
     <div class="card"><h3>הסעות</h3><div class="big num">${g.bus.center+g.bus.jlm}</div><p class="hint num" style="margin-top:2px">מהמרכז ${g.bus.center} · מירושלים ${g.bus.jlm}</p></div>
     <div class="card"><h3>מתנות שנרשמו</h3><div class="big num gold">${ils(g.gifts)}</div></div>
   </div>
+  ${shuttleCard()}
   <details class="arch"><summary>פילוח לפי קבוצה${inv.length?' ולפי מי הזמין':''}</summary>
     <div class="grid">
       <ul class="upcoming" style="margin:0">${groups.map(r=>`<li><span class="w">${h(r.k)}</span><span class="num">${r.inv}${r.yes?` · ${r.yes} מגיעים`:''}</span></li>`).join('')}</ul>
@@ -904,6 +912,68 @@ function renderGiftList(){
         ${wa?`<a class="chip" href="${h(wa)}" target="_blank" rel="noopener noreferrer">וואטסאפ</a>`:''}
       </div></div>`}).join('')}</div>`:'<p class="hint">אין מתנות שמתאימות לסינון.</p>';
 }
+/* ---------- activity: a short shared log of who changed what ---------- */
+const who=()=>{const u=window.weddingPlatform&&window.weddingPlatform.user&&window.weddingPlatform.user();if(!u)return '';const em=(S.settings.inviteEmail||'').trim().toLowerCase();return em&&String(u.email||'').toLowerCase()===em?names()[1]:names()[0]};
+function logAct(text){if(!db||!text)return;db.collection('activity').add({at:Date.now(),by:who(),text:String(text).slice(0,160)}).catch(()=>{})}
+let prevSeen=0;try{prevSeen=+localStorage.getItem('wed-seen')||0;localStorage.setItem('wed-seen',String(Date.now()))}catch(_){}
+const ago=t=>{const m=Math.round((Date.now()-t)/6e4);if(m<1)return 'עכשיו';if(m<60)return `לפני ${m} דק׳`;const hh=Math.round(m/60);if(hh<24)return hh===1?'לפני שעה':`לפני ${hh} שעות`;const d=Math.round(hh/24);return d===1?'אתמול':d<7?`לפני ${d} ימים`:new Date(t).toLocaleDateString('he-IL',{day:'numeric',month:'short'})};
+function activityCard(){
+  const list=S.activity.slice().sort((a,b)=>num(b.at)-num(a.at)).slice(0,8);if(!list.length)return '';
+  const me=who();
+  return `<section class="card"><div class="sec-head"><h2>מה חדש</h2></div><ul class="upcoming">${list.map(x=>`<li><span class="w"><b>${h(x.by||'')}</b> · ${h(x.text)}${num(x.at)>prevSeen&&x.by&&x.by!==me?' <span class="pill acc">חדש</span>':''}</span><span class="hint num" style="margin:0;flex:none">${h(ago(num(x.at)))}</span></li>`).join('')}</ul></section>`;
+}
+
+/* ---------- closing a vendor ticks off its checklist task ---------- */
+const V2T={'אולם / גן אירועים':['לסגור אולם ותאריך ולשלם מקדמה'],'צלם סטילס':['צלם סטילס'],'צלם וידאו':['צלם וידאו / מגנטים'],'דיג׳יי / להקה':['דיג׳יי או להקה'],'עורך טקס':['עורך טקס / רב'],'רב / מסדר קידושין':['עורך טקס / רב'],'עיצוב ופרחים':['עיצוב ופרחים (אם לא כלול באולם)'],'איפור ושיער':['איפור ושיער: לבחור ולסגור'],'הסעות':['הסעות: לבחור חברה ולשריין'],'תכשיטים וטבעות':['טבעות'],'הזמנות':['לעצב ולהזמין הזמנות']};
+async function completeTasksFor(v){
+  const titles=V2T[v.type]||[];const open=S.tasks.filter(t=>t.status!=='done'&&titles.includes((t.title||'').trim()));
+  for(const t of open){try{await db.doc('tasks/'+t.id).update({status:'done',updatedAt:Date.now(),note:[t.note,`סומן אוטומטית כשנסגר ${v.name}`].filter(Boolean).join(' · ')})}catch(_){}}
+  return open.length;
+}
+
+/* ---------- shuttles: how many vehicles for each pickup point ---------- */
+function vehiclePlan(n){
+  if(n<=0)return '';const out=[];let left=n;
+  while(left>50){out.push('אוטובוס');left-=50}
+  out.push(left>32?'אוטובוס':left>20?'מידיבוס':'מיניבוס');
+  const c={};out.forEach(x=>c[x]=(c[x]||0)+1);
+  return Object.entries(c).map(([k,v])=>v>1?`${v} ${k==='אוטובוס'?'אוטובוסים':k==='מידיבוס'?'מידיבוסים':'מיניבוסים'}`:k).join(' + ');
+}
+function shuttleCard(){
+  const pts=[['center','מהמרכז'],['jlm','מירושלים']];
+  const row=k=>{let yes=0,maybe=0;for(const g of S.guests){if(g.shuttle!==k||g.rsvp==='no')continue;const c=Math.max(0,num(g.count)||1);if(g.rsvp==='yes')yes+=num(g.coming)>0?num(g.coming):c;else maybe+=c}return {yes,maybe}};
+  const rows=pts.map(([k,l])=>({k,l,...row(k)})).filter(r=>r.yes||r.maybe);
+  if(!rows.length)return '';
+  return `<section class="card"><h3>תכנון הסעות</h3><ul class="lines num">${rows.map(r=>`<li style="align-items:flex-start"><span>${h(r.l)}: <b>${r.yes}</b> אישרו${r.maybe?` · עוד ${r.maybe} שסימנו הסעה וטרם ענו`:''}</span><span style="text-align:end">${h(vehiclePlan(r.yes+r.maybe))}</span></li>`).join('')}</ul>
+    <p class="hint" style="margin:6px 0 0">החישוב כולל גם מי שעוד לא ענה. גדלים טיפוסיים: מיניבוס עד 20, מידיבוס עד 32, אוטובוס עד 50. כדאי לוודא מול חברת ההסעות.</p></section>`;
+}
+
+/* ---------- day-of schedule ---------- */
+const DAY_TEMPLATE=[['10:00','איפור ושיער לכלה'],['13:00','התארגנות חתן'],['15:30','צילומי זוג ומשפחה'],['17:30','הגעה לאולם, בדיקה מול הספקים'],['18:30','קבלת פנים'],['19:45','חופה'],['20:30','ארוחה וריקודים'],['23:30','סיום, איסוף מתנות וציוד']];
+const tmin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t||'');return m?(+m[1])*60+(+m[2]):9e9};
+function dayText(){
+  const d=parseD(S.settings.date);const items=S.timeline.slice().sort((a,b)=>tmin(a.time)-tmin(b.time));
+  const vend=id=>S.vendors.find(v=>v.id===id);
+  const lines=[`לו״ז יום החתונה של ${names().join(' ו')}${d?' – '+d.toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'long'}):''}`,''];
+  items.forEach(x=>{const v=vend(x.vendorId);lines.push(`${x.time} ${x.title}${x.place?' · '+x.place:''}${v?` (${v.name}${v.phone?' '+v.phone:''})`:''}`)});
+  const closed=S.vendors.filter(v=>v.status==='closed'&&v.phone);
+  if(closed.length){lines.push('','אנשי קשר:');closed.forEach(v=>lines.push(`${v.type?v.type.split(' / ')[0]+' – ':''}${v.name}${v.contact?' ('+v.contact+')':''}: ${v.phone}`))}
+  return lines.join('\n');
+}
+function vDay(){
+  const items=S.timeline.slice().sort((a,b)=>tmin(a.time)-tmin(b.time));
+  const d=parseD(S.settings.date);
+  return `<div class="sec-head"><div><h2>יום החתונה</h2><p>${d?h(d.toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'long',year:'numeric'})):'עוד לא נקבע תאריך'} · ${items.length} שלבים</p></div>${addBtn('timeline','שלב חדש')}</div>
+  ${items.length?`<div class="list">${items.map(x=>{const v=S.vendors.find(y=>y.id===x.vendorId);const tel=v&&v.phone?String(v.phone).replace(/[^\d+]/g,''):'';
+    return `<div class="row"><div class="main" data-act="edit" data-kind="timeline" data-id="${h(x.id)}"><div class="t"><span class="num" style="color:var(--accent)">${h(x.time||'')}</span> · ${h(x.title)}</div>
+      <div class="meta">${x.place?`<span>${h(x.place)}</span>`:''}${v?`<span>${h(v.name)}</span>`:''}${x.note?`<span>${h(x.note)}</span>`:''}</div></div>
+      ${tel?`<a class="chip" href="tel:${h(tel)}">חיוג</a>`:''}</div>`}).join('')}</div>
+    <div class="chips"><a class="btn" href="https://wa.me/?text=${encodeURIComponent(dayText())}" target="_blank" rel="noopener noreferrer">שליחה בוואטסאפ</a><button class="btn" type="button" data-act="daycopy">העתקה</button></div>
+    <p class="hint">השליחה כוללת את כל השלבים ואת הטלפונים של הספקים שנסגרו. אפשר לשלוח להורים, למפיקה או לקבוצת המשפחה.</p>`
+  :empty('עוד אין לו״ז','בונים את היום לפי שעות: איפור, צילומים, קבלת פנים, חופה. לכל שלב אפשר לשייך ספק, והטלפון שלו יופיע ליד.','timeline','שלב חדש',canWrite?'<button class="btn" type="button" data-act="daytpl">טעינת לו״ז לדוגמה</button>':'')}
+  ${archiveSection('timeline','לו״ז')}`;
+}
+
 /* ---------- vendors: compare offers per type, close one, budget follows ---------- */
 async function addVendorExpense(v){
   const q=num(v.quote),dep=num(v.deposit),now=Date.now();const installments=[];
@@ -915,8 +985,10 @@ async function addVendorExpense(v){
 }
 async function vendorClosed(v){
   if(!db)return;
-  if(S.expenses.some(e=>e.vendorId===v.id)){toast('הספק סומן כנסגר');return}
-  try{const side=await addVendorExpense(v);toast(side?'נסגר ונוסף להוצאות הנלוות':'נסגר ונוסף לתקציב')}
+  logAct(`נסגר ספק: ${v.name}${v.type?' ('+v.type+')':''}`);
+  const nt=await completeTasksFor(v);const tasksMsg=nt?` · ${nt===1?'משימה סומנה':nt+' משימות סומנו'} כבוצע`:'';
+  if(S.expenses.some(e=>e.vendorId===v.id)){toast('הספק סומן כנסגר'+tasksMsg);return}
+  try{const side=await addVendorExpense(v);toast((side?'נסגר ונוסף להוצאות הנלוות':'נסגר ונוסף לתקציב')+tasksMsg)}
   catch(err){toast('הספק נסגר, אבל ההוספה לתקציב נכשלה. אפשר ללחוץ "הוספה לתקציב" בכרטיס.')}
 }
 function vendorCard(v,cheapId){
@@ -1285,7 +1357,7 @@ function openSheet(kind,item){
   let src=kind==='settings'?S.settings:(item||{});
   if(kind==='caps'){const caps=S.settings.caps||{};src={};ALLCATS().forEach((c,i)=>src['cap'+i]=caps[c]||'')}
   if(kind==='meetings'&&item&&item.vendorId)src={...item,venueId:'vd:'+item.vendorId};
-  $('#sheetTitle').textContent=(kind==='settings'||kind==='caps')?sc.t:(item?'עריכת '+sc.t:(sc.t+' חדשה').replace('ספק חדשה','ספק חדש').replace('פגישה חדשה','קביעת פגישה').replace('מוזמן חדשה','מוזמן חדש').replace('אולם חדשה','אולם חדש').replace('ממן חדשה','ממן חדש'));
+  $('#sheetTitle').textContent=(kind==='settings'||kind==='caps')?sc.t:(item?'עריכת '+sc.t:(sc.t+' חדשה').replace('ספק חדשה','ספק חדש').replace('פגישה חדשה','קביעת פגישה').replace('מוזמן חדשה','מוזמן חדש').replace('אולם חדשה','אולם חדש').replace('ממן חדשה','ממן חדש').replace('שלב חדשה','שלב חדש'));
   instDraft=hasInst(kind)?insts(src).map(i=>({...i})):[];
   if(hasInst(kind)&&!instDraft.length&&num(src.paid))instDraft=[{id:'i'+Date.now(),amount:num(src.paid),date:'',method:'transfer',paid:true,night:false}];
   filesDraft=hasFiles(kind)?(src.files||[]).map(f=>({...f})):[];
@@ -1342,6 +1414,9 @@ $('#sheetForm').addEventListener('submit',async ev=>{
     }
     else if(cur){const {id,...rest}=cur;await db.doc(coll+'/'+id).set({...rest,...data,updatedAt:Date.now()})}
     else await db.collection(coll).add({...data,createdAt:Date.now()});
+    const LBL={tasks:'משימה',expenses:'הוצאה',extras:'הוצאה נלווית',guests:'מוזמן',vendors:'ספק',venues:'אולם',gifts:'מתנה',funders:'ממן',meetings:'פגישה',timeline:'שלב בלו״ז'};
+    if(curKind==='settings')logAct('עודכנו ההגדרות');else if(curKind==='caps')logAct('עודכנו תקרות התקציב');
+    else if(LBL[curKind]){const nm=data.name||data.title||data.from||data.withName||data.venueName||'';logAct(`${cur?'עודכן':'נוסף'} ${LBL[curKind]}${nm?': '+nm:''}${curKind==='gifts'&&num(data.amount)?' · '+ils(data.amount):''}${curKind==='meetings'&&data.date?' · '+fdShort(data.date):''}`)}
     const again=saveAgain&&curKind==='gifts'&&!cur;saveAgain=false;closeSheet();toast('נשמר');if(again)setTimeout(()=>openSheet('gifts'),50);
   }catch(e){const el=$('#sheetErr');el.textContent=errMsg(e);el.hidden=false}
   finally{busy=false;$('#saveBtn').disabled=false}
@@ -1349,7 +1424,7 @@ $('#sheetForm').addEventListener('submit',async ev=>{
 $('#delBtn').addEventListener('click',async()=>{
   if(busy||!cur)return;busy=true;
   const coll=curKind==='extras'?'expenses':curKind;
-  try{if(curKind==='meetings')await removeMeetingCal(cur);await db.doc(coll+'/'+cur.id).update({archived:true,archivedAt:Date.now()});closeSheet();toast('הועבר לארכיון. אפשר לשחזר מתחתית הרשימה.')}
+  try{if(curKind==='meetings')await removeMeetingCal(cur);await db.doc(coll+'/'+cur.id).update({archived:true,archivedAt:Date.now()});logAct('הועבר לארכיון: '+(cur.name||cur.title||cur.from||cur.venueName||cur.withName||''));closeSheet();toast('הועבר לארכיון. אפשר לשחזר מתחתית הרשימה.')}
   catch(e){const el=$('#sheetErr');el.textContent=errMsg(e);el.hidden=false}
   finally{busy=false}
 });
@@ -1397,6 +1472,8 @@ document.addEventListener('click',async e=>{
   else if(act==='drive')driveManual();
   else if(act==='meet'){openSheet('meetings');const sel=$('#f_venueId');if(sel)sel.value=a.dataset.id}
   else if(act==='q')openQ(a.dataset.id)
+  else if(act==='daytpl'){if(!db||busy)return;busy=true;a.disabled=true;try{let i=0;for(const [time,title] of DAY_TEMPLATE)await db.collection('timeline').add({time,title,vendorId:'',place:'',note:'',createdAt:Date.now()+(i++)});logAct('נטען לו״ז לדוגמה ליום החתונה');toast('נטען לו״ז לדוגמה. מעדכנים שעות לפי האולם.')}catch(err){toast(errMsg(err))}finally{busy=false}}
+  else if(act==='daycopy'){const txt=dayText();try{await navigator.clipboard.writeText(txt);toast('הלו״ז הועתק')}catch(_){toast('לא הצלחתי להעתיק')}}
   else if(act==='vadd'){openSheet('vendors');const sel=$('#f_type');if(sel)sel.value=a.dataset.type}
   else if(act==='vclose'){
     const v=S.vendors.find(x=>x.id===a.dataset.id);if(!v||!db||busy)return;
@@ -1433,7 +1510,7 @@ document.addEventListener('click',async e=>{
   else if(act==='edit'){let k=a.dataset.kind;const it=find(k,a.dataset.id);if(!it)return;if(k==='expenses'&&it.side)k='extras';openSheet(k,it)}
   else if(act==='toggle'){
     const t=S.tasks.find(x=>x.id===a.dataset.id);if(!t||!db||busy)return;busy=true;
-    try{await db.doc('tasks/'+t.id).update({status:t.status==='done'?'todo':'done',updatedAt:Date.now()})}catch(err){toast(errMsg(err))}finally{busy=false}
+    try{await db.doc('tasks/'+t.id).update({status:t.status==='done'?'todo':'done',updatedAt:Date.now()});logAct((t.status==='done'?'נפתחה מחדש משימה: ':'בוצעה משימה: ')+t.title)}catch(err){toast(errMsg(err))}finally{busy=false}
   }
   else if(act==='template'){
     if(!db||busy)return;busy=true;a.disabled=true;
@@ -1647,6 +1724,7 @@ async function runImport(){
   if(src.drive&&!res.failed)await markDriveSync(src.drive,res,src.sheets);
   IMP={...src,step:'done',...res};renderImport();
   toast(`נוספו ${res.added}, עודכנו ${res.updated}`);
+  if(res.added||res.updated)logAct(`ייבוא מוזמנים: ${res.added} חדשים, ${res.updated} עודכנו`);
 }
 
 /* ---------- Google Drive sync ----------
@@ -1730,7 +1808,7 @@ async function driveAuto(){
     const res=await applyPlan(P,sheets,{});
     if(res.failed)throw {message:res.err||'failed'};
     await markDriveSync({fileId:f.id,title:f.title,modified:f.modifiedTime},res,null);
-    if(res.added||res.updated)toast(`עודכן מהדרייב: ${res.added} חדשים, ${res.updated} עודכנו`);
+    if(res.added||res.updated){toast(`עודכן מהדרייב: ${res.added} חדשים, ${res.updated} עודכנו`);logAct(`עדכון מהדרייב: ${res.added} חדשים, ${res.updated} עודכנו`)}
   }catch(e){try{await db.doc('settings/main').update({driveSync:{...ds(),runningAt:0,lastError:driveErr(e),lastErrorAt:Date.now()}})}catch(_){}}
   finally{driveBusy=false}
 }
