@@ -80,7 +80,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .btn.danger.armed{background:var(--bad);color:var(--surface)}
 .btn.small{padding:5px 10px;font-size:.85rem}
 
-main{padding-block:20px 48px;display:grid;gap:20px}
+main{padding-block:20px 104px;display:grid;gap:20px}
 main>*,#view>*{min-width:0}
 .notice{margin-top:12px;padding:10px 14px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:.92rem}
 .sec-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
@@ -214,6 +214,18 @@ body{margin:0}
 .qsave{font-size:.8rem;color:var(--muted)}
 .ans td{white-space:normal;min-width:160px;vertical-align:top}
 .ans td.q{min-width:200px;font-weight:600}
+.fab{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:20;width:58px;height:58px;border-radius:50%;border:0;background:var(--accent);color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.22);display:grid;place-items:center;cursor:pointer}
+.fab svg{width:28px;height:28px}
+body:has(#sheet:not([hidden])) .fab,body:has(#imp:not([hidden])) .fab,body:has(#drawer:not([hidden])) .fab{display:none}
+.fab[aria-expanded="true"] svg{transform:rotate(45deg)}
+.fabmenu{position:fixed;right:18px;bottom:calc(86px + env(safe-area-inset-bottom,0px));z-index:21;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:6px;display:grid;min-width:190px;animation:fadeIn .15s ease-out}
+.fabmenu button{display:flex;align-items:center;gap:10px;padding:12px 14px;border:0;background:none;border-radius:10px;font:inherit;font-size:1rem;color:var(--ink);text-align:right;cursor:pointer}
+.fabmenu button:hover{background:var(--surface-2)}
+.qr{display:flex;align-items:center;gap:4px;flex:none}
+.qr button{min-width:40px;height:36px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:.88rem;cursor:pointer}
+.qr button.yes{border-color:var(--ok);color:var(--ok)}
+.qr button.no{color:var(--muted)}
+.qr .n{min-width:22px;text-align:center;font-weight:700}
 .me{display:flex;align-items:center;gap:8px;padding:8px 14px;color:var(--muted);font-size:.88rem;overflow-wrap:anywhere}
 </style>
 </head>
@@ -242,6 +254,8 @@ body{margin:0}
   </header>
   <div class="wrap"><div id="notice" class="notice" hidden></div></div>
   <main class="wrap" id="main"></main>
+  <button id="fab" class="fab" type="button" aria-label="הוספה מהירה" aria-expanded="false" aria-controls="fabMenu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div id="fabMenu" class="fabmenu" hidden role="menu" aria-label="הוספה מהירה"></div>
 </div>
 
 <div id="drawer" class="drawer" hidden dir="rtl" lang="he">
@@ -302,6 +316,8 @@ const names=()=>[S.settings.n1||'רועי',S.settings.n2||'בת הזוג'];
 const lab=(opts,v)=>{const o=opts.find(x=>x[0]===v);return o?o[1]:(v||'')};
 
 const OWNER=()=>[['a',names()[0]],['b',names()[1]],['both','שנינו']];
+const meKey=()=>{const u=window.weddingPlatform&&window.weddingPlatform.user&&window.weddingPlatform.user();if(!u)return '';const em=(S.settings.inviteEmail||'').trim().toLowerCase();return em&&String(u.email||'').toLowerCase()===em?'b':'a'};
+const isMine=t=>{const k=meKey();return !k||!t.owner||t.owner===k||t.owner==='both'};
 const TSTATUS=[['todo','לביצוע'],['doing','בתהליך'],['done','בוצע']];
 const TCATS=['כללי','ספקים','מוזמנים','ביגוד ומראה','בירוקרטיה','טקס','אחרי החתונה'].map(x=>[x,x]);
 const ECATS=['אולם וקייטרינג','צילום','מוזיקה','עיצוב ופרחים','טקס','הזמנות ומיתוג','הסעות','אלכוהול ובר','אחר'].map(x=>[x,x]);
@@ -339,6 +355,9 @@ const SCH={
     {k:'cat',l:'קטגוריה',t:'select',o:()=>ECATS},
     {k:'funder',l:'מי מממן',t:'select',o:()=>FUNDER_OPTS(),d:''},
     {k:'planned',l:'מתוכנן',t:'money'},
+    {k:'perPlate',l:'מחיר למנה (העלות תתעדכן לפי מספר המגיעים)',t:'money'},
+    {k:'minPlates',l:'מינימום מנות',t:'number'},
+    {k:'plusFixed',l:'תוספות קבועות',t:'money'},
     {k:'actual',l:'עלות סופית',t:'money'},
     {k:'note',l:'הערות',t:'textarea',wide:1}]},
   extras:{t:'הוצאה נלווית',f:[
@@ -507,7 +526,14 @@ const fdateD=d=>d?d.toLocaleDateString('he-IL',{day:'numeric',month:'short',year
 const isoD=d=>d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`:'';
 
 /* ---------- derived numbers ---------- */
-function cost(e){return num(e.actual)>0?num(e.actual):num(e.planned)}
+/* an expense priced per plate follows the guest numbers: confirmed guests once RSVPs arrive, the estimate before */
+function expectedPeople(){const g=guestNums();return (g.yes||g.no)?g.yes+g.pend:(num(S.settings.guestEst)||g.invited)}
+function peopleBasis(){const g=guestNums();return (g.yes||g.no)?`${g.yes} אישרו + ${g.pend} טרם ענו`:'לפי ההערכה בהגדרות, עד שיגיעו אישורים'}
+function platesNow(e){return Math.max(expectedPeople(),num(e.minPlates))}
+function plateCost(e){return num(e.perPlate)*platesNow(e)+num(e.plusFixed)}
+function cost(e){if(num(e.actual)>0)return num(e.actual);if(num(e.perPlate)>0)return plateCost(e);return num(e.planned)}
+let plateSyncT=null;
+function syncPlateExpenses(){clearTimeout(plateSyncT);plateSyncT=setTimeout(async()=>{if(!db||!canWrite)return;for(const e of S.expenses){if(num(e.perPlate)>0&&!(num(e.actual)>0)){const v=Math.round(plateCost(e));if(v!==Math.round(num(e.planned))){try{await db.doc('expenses/'+e.id).update({planned:v})}catch(_){}}}}},3000)}
 const insts=e=>Array.isArray(e.installments)?e.installments:[];
 function paidOf(e){const L=insts(e);return L.length?L.filter(i=>i.paid).reduce((a,i)=>a+num(i.amount),0):num(e.paid)}
 function nextInst(e){return insts(e).filter(i=>!i.paid&&i.date).sort((a,b)=>a.date.localeCompare(b.date))[0]||null}
@@ -591,6 +617,7 @@ function render(){
   }
   const fn={overview:vOverview,venues:vVenues,tasks:vTasks,gifts:vGifts,budget:()=>vMoney(false),extras:()=>vMoney(true),guests:vGuests,vendors:vVendors,day:vDay}[tab];
   m.innerHTML=fn();
+  if(S.expenses.some(e=>num(e.perPlate)>0))syncPlateExpenses();
   if(tab==='guests')renderGuestList();
   if(tab==='gifts')renderGiftList();
 }
@@ -603,7 +630,7 @@ function vOverview(){
   const catering=people*num(st.plate), giftsEst=people*num(st.giftAvg);
   const done=S.tasks.filter(t=>t.status==='done').length, tot=S.tasks.length;
   const t0=today();
-  const nextTasks=S.tasks.filter(t=>t.status!=='done').sort((x,y)=>((eff(x).d||9e15)-(eff(y).d||9e15))||stageIdx(x.stage)-stageIdx(y.stage)||(x.createdAt||0)-(y.createdAt||0)).slice(0,5);
+  const nextTasks=S.tasks.filter(t=>t.status!=='done'&&isMine(t)).sort((x,y)=>((eff(x).d||9e15)-(eff(y).d||9e15))||stageIdx(x.stage)-stageIdx(y.stage)||(x.createdAt||0)-(y.createdAt||0)).slice(0,5);
   const pays=upcomingPays().slice(0,5);
   const over=budget&&all.planned>budget;
   const capsOver=overCaps();
@@ -661,7 +688,7 @@ function vOverview(){
   </div>
   <div class="grid">
     <section class="card">
-      <div class="sec-head"><h2>הבאות בתור</h2><button class="btn small ghost" type="button" data-tab="tasks">לכל המשימות</button></div>
+      <div class="sec-head"><h2>${meKey()?"הבאות שלך":"הבאות בתור"}</h2><button class="btn small ghost" type="button" data-act="mytasks">לכל המשימות</button></div>
       ${nextTasks.length?`<ul class="upcoming">${nextTasks.map(t=>{const d=eff(t).d;return `<li><span class="w">${h(t.title)}</span><span class="num ${d&&d<t0?'late':''}" style="color:${d&&d<t0?'':'var(--muted)'}">${d?fdateD(d):h(lab(STAGES.map(([k,l])=>[k,l]),t.stage)||lab(OWNER(),t.owner))}</span></li>`}).join('')}</ul>`:'<p class="hint">אין משימות פתוחות.</p>'}
     </section>
     <section class="card">
@@ -688,8 +715,9 @@ function vTasks(){
   if(taskFilter==='open')list=list.filter(t=>t.status!=='done');
   else if(taskFilter==='done')list=list.filter(t=>t.status==='done');
   else if(taskFilter==='a'||taskFilter==='b')list=list.filter(t=>t.owner===taskFilter||t.owner==='both');
+  else if(taskFilter==='mine')list=list.filter(t=>t.status!=='done'&&isMine(t));
   const [a,b]=names();
-  const filters=[['open','פתוחות'],['all','הכל'],['done','בוצעו'],['a','של '+a],['b','של '+b]];
+  const filters=[['open','פתוחות'],...(meKey()?[['mine','שלי']]:[]),['all','הכל'],['done','בוצעו'],['a','של '+a],['b','של '+b]];
   const late=S.tasks.filter(t=>{const e=eff(t);return t.status!=='done'&&e.d&&e.d<t0}).length;
   const fastOpen=S.tasks.filter(t=>t.status!=='done'&&eff(t).kind==='fast').length;
   const hasDate=!!parseD(S.settings.date);
@@ -750,6 +778,7 @@ function expCards(list,kind){
       <div class="main" style="display:grid;gap:4px">
         <div class="sec-head" style="gap:6px"><span class="t">${h(e.name)}</span><span class="num" style="font-weight:700">${c?ils(c):'–'}</span></div>
         <div class="meta"><span class="pill">${h(e.cat||'')}</span>${fn?`<span>${h(fn.name)}</span>`:''}${nf?`<span>${nf} קבצים</span>`:''}</div>
+        ${num(e.perPlate)>0&&!(num(e.actual)>0)?`<div class="meta num"><span>${platesNow(e)} מנות × ${ils(e.perPlate)}${num(e.plusFixed)?' + '+ils(e.plusFixed):''} · ${peopleBasis()}</span></div>`:''}
         ${c?bar([[p/c*100,'g']]):''}
         <div class="meta num"><span>שולם ${ils(p)}</span><span>·</span><span>${left>0?'נשאר '+ils(left):'<span class="pill ok">שולם</span>'}</span></div>
         ${nx?`<div class="meta num ${late?'late':''}">הבא: ${fdate(nx.date)} · ${ils(nx.amount)} · ${h(lab(METHODS,nx.method))}${isNight(nx)?' · בערב האירוע':''}</div>`:''}
@@ -771,7 +800,7 @@ function vMoney(isSide){
       <td class="name">${h(e.name)}${nf?` <span class="pill">${nf} קבצים</span>`:''}</td>
       <td><span class="pill">${h(e.cat||'')}</span></td>
       <td>${fn?h(fn.name):'<span class="hint" style="margin:0">–</span>'}</td>
-      <td class="n">${cost(e)?ils(cost(e)):'–'}${num(e.actual)?'':(num(e.planned)?' <span class="hint" style="margin:0">(מתוכנן)</span>':'')}</td>
+      <td class="n">${cost(e)?ils(cost(e)):'–'}${num(e.actual)?'':num(e.perPlate)>0?` <span class="hint" style="margin:0">(${platesNow(e)} מנות)</span>`:(num(e.planned)?' <span class="hint" style="margin:0">(מתוכנן)</span>':'')}</td>
       <td class="n">${p?ils(p):'–'}</td>
       <td class="n">${left>0?ils(left):(cost(e)?'<span class="pill ok">שולם</span>':'–')}</td>
       <td class="num ${late?'late':''}">${nx?`${fdate(nx.date)} · ${ils(nx.amount)}${isNight(nx)?' · בערב':''}`:(e.due?fdate(e.due):'')}</td></tr>`}).join('')}</tbody>
@@ -836,11 +865,24 @@ function renderGuestList(){
     return `<div class="row"><div class="main" data-act="edit" data-kind="guests" data-id="${h(x.id)}">
       <div class="t">${h(x.name)} <span class="num" style="color:var(--muted);font-weight:500">· ${num(x.count)||1}${num(x.kids)?` (${num(x.kids)} ילדים)`:''}</span></div>
       <div class="meta"><span class="pill ${cls}">${lab(RSVP,r)}${r==='yes'&&num(x.coming)?' '+num(x.coming):''}</span><span>${h(lab(GSIDE(),x.side))}</span>${x.group?`<span>${h(x.group)}</span>`:''}${x.inviter?`<span>הזמין: ${h(x.inviter)}</span>`:''}${x.shuttle==='center'||x.shuttle==='jlm'?`<span class="pill acc">הסעה ${lab(SHUTTLE,x.shuttle)}</span>`:''}${num(x.gift)+giftSum(x.id)?`<span class="pill gold num">${ils(num(x.gift)+giftSum(x.id))}</span>`:''}</div>
-    </div>${x.phone?`<span class="sel num" style="color:var(--muted);font-size:.85rem">${h(x.phone)}</span>`:''}</div>`}).join('')}</div>
+    ${x.phone?`<div class="meta num"><span>${h(x.phone)}</span></div>`:''}</div>${canWrite?quickRsvp(x):''}</div>`}).join('')}</div>
     ${list.length>guestShow?`<button class="btn" type="button" data-act="more" style="margin-top:8px;width:100%">הצגת עוד ${Math.min(100,list.length-guestShow)}</button>`:''}`:'<p class="hint">אין מוזמנים שמתאימים לסינון.</p>';
 }
 
 
+function quickRsvp(x){
+  const c=Math.max(1,num(x.count)||1);const r=x.rsvp||'pending';
+  if(r==='yes'){const k=num(x.coming)>0?num(x.coming):c;return `<div class="qr" aria-label="כמה מגיעים"><button type="button" data-qr="dec" data-id="${h(x.id)}" aria-label="אחד פחות">−</button><span class="n num">${k}</span><button type="button" data-qr="inc" data-id="${h(x.id)}" aria-label="אחד יותר">+</button></div>`}
+  if(r==='no')return `<div class="qr"><button type="button" class="yes" data-qr="yes" data-id="${h(x.id)}">מגיע</button></div>`;
+  return `<div class="qr"><button type="button" class="yes" data-qr="yes" data-id="${h(x.id)}">מגיע</button><button type="button" class="no" data-qr="no" data-id="${h(x.id)}">לא</button></div>`;
+}
+async function setRsvp(id,how){
+  const x=S.guests.find(g=>g.id===id);if(!x||!db)return;const c=Math.max(1,num(x.count)||1);const k=num(x.coming)>0?num(x.coming):c;let upd;
+  if(how==='yes')upd={rsvp:'yes',coming:c};else if(how==='no')upd={rsvp:'no',coming:0};
+  else if(how==='inc')upd={coming:k+1};else if(how==='dec')upd=k-1<=0?{rsvp:'no',coming:0}:{coming:k-1};
+  Object.assign(x,upd);renderGuestList();
+  try{await db.doc('guests/'+id).update({...upd,updatedAt:Date.now()})}catch(e){toast(errMsg(e))}
+}
 function thanksText(gf){
   const [a,b]=names();const tpl=S.settings.thanksTemplate||THANKS_DEFAULT;
   const g=S.guests.find(x=>x.id===gf.guestId);
@@ -912,6 +954,15 @@ function renderGiftList(){
         ${wa?`<a class="chip" href="${h(wa)}" target="_blank" rel="noopener noreferrer">וואטסאפ</a>`:''}
       </div></div>`}).join('')}</div>`:'<p class="hint">אין מתנות שמתאימות לסינון.</p>';
 }
+/* ---------- quick add (floating button) ---------- */
+const FAB_ITEMS=[['guests','מוזמן'],['gifts','מתנה'],['expenses','הוצאה'],['tasks','משימה'],['meetings','פגישה'],['vendors','ספק'],['timeline','שלב ביום החתונה']];
+function toggleFab(open){
+  const m=$('#fabMenu'),b=$('#fab');const show=open===undefined?m.hidden:open;
+  if(show){m.innerHTML=FAB_ITEMS.map(([k,l])=>`<button type="button" role="menuitem" data-fab="${k}">${h(l)}</button>`).join('')}
+  m.hidden=!show;b.setAttribute('aria-expanded',String(show));
+  if(show){const f=m.querySelector('button');if(f)f.focus()}
+}
+
 /* ---------- activity: a short shared log of who changed what ---------- */
 const who=()=>{const u=window.weddingPlatform&&window.weddingPlatform.user&&window.weddingPlatform.user();if(!u)return '';const em=(S.settings.inviteEmail||'').trim().toLowerCase();return em&&String(u.email||'').toLowerCase()===em?names()[1]:names()[0]};
 function logAct(text){if(!db||!text)return;db.collection('activity').add({at:Date.now(),by:who(),text:String(text).slice(0,160)}).catch(()=>{})}
@@ -980,6 +1031,12 @@ async function addVendorExpense(v){
   if(dep)installments.push({id:'i'+now,amount:dep,date:isoD(today()),method:'transfer',paid:true,night:false});
   if(q>dep)installments.push({id:'i'+(now+1),amount:q-dep,date:S.settings.date||'',method:'check',paid:false,night:true});
   const side=!!V2X[v.type];
+  const ven=v.venueId&&S.venues.find(x=>x.id===v.venueId);const bq=ven&&bestQuote(ven);
+  if(bq&&num(bq.price)>0){
+    const e={name:v.name,cat:V2E[v.type]||'אולם וקייטרינג',funder:'',perPlate:num(bq.price)+num(ven.extraPerPlate),minPlates:num(bq.minGuests),plusFixed:num(ven.extraFixed),actual:0,files:v.files||[],note:[bq.date?'הצעה ל-'+fdShort(bq.date):'',v.included?'כלול: '+v.included:''].filter(Boolean).join(' · '),side:false,vendorId:v.id,createdAt:now};
+    e.planned=Math.round(plateCost(e));e.installments=dep?[installments[0]]:[];
+    await db.collection('expenses').add(e);return false;
+  }
   await db.collection('expenses').add({name:v.name,cat:side?V2X[v.type]:(V2E[v.type]||'אחר'),funder:'',planned:q,actual:q,installments,files:v.files||[],note:v.included?('כלול: '+v.included):'',side,vendorId:v.id,createdAt:now});
   return side;
 }
@@ -1439,7 +1496,7 @@ $('#sheet').addEventListener('click',e=>{
 });
 $('#sheet').addEventListener('change',e=>{if(e.target.id==='fileIn'){uploadFile(e.target.files[0]);e.target.value=''}});
 $('#sheet').addEventListener('input',e=>{if(e.target.matches('#instEd [data-f=amount],#f_planned,#f_actual')){syncInst();const p=document.activeElement&&document.activeElement.id;renderInst();if(p){const el=document.getElementById(p);if(el){el.focus();try{const v=el.value;el.value='';el.value=v}catch(_){}}}}});
-document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(!$('#sheet').hidden)closeSheet();else if(!$('#drawer').hidden){closeDrawer();$('#menuBtn').focus()}});
+document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(!$('#fabMenu').hidden){toggleFab(false);$('#fab').focus();return}if(!$('#sheet').hidden)closeSheet();else if(!$('#drawer').hidden){closeDrawer();$('#menuBtn').focus()}});
 $('#settingsBtn').addEventListener('click',()=>openSheet('settings'));
 
 let toastT;
@@ -1452,6 +1509,10 @@ document.addEventListener('click',async e=>{
   if(e.target.closest('[data-dclose]')){closeDrawer();return}
   const tb=e.target.closest('[data-tab]');
   if(tb){closeDrawer();tab=tb.dataset.tab;try{localStorage.setItem('wed-tab',tab)}catch(_){}render();window.scrollTo({top:0});return}
+  const qr=e.target.closest('[data-qr]');if(qr){if(canWrite)setRsvp(qr.dataset.id,qr.dataset.qr);return}
+  const fabB=e.target.closest('#fab');if(fabB){toggleFab();return}
+  const fi=e.target.closest('[data-fab]');if(fi){toggleFab(false);const k=fi.dataset.fab;if(k==='meetings'){openSheet('meetings')}else{if(k==='extras'){tab='extras'}openSheet(k)}return}
+  if(!$('#fabMenu').hidden&&!e.target.closest('#fabMenu'))toggleFab(false);
   const tf=e.target.closest('[data-tfilter]');if(tf){taskFilter=tf.dataset.tfilter;render();return}
   const gff=e.target.closest('[data-giftf]');if(gff){giftFilter=gff.dataset.giftf;render();return}
   const gf=e.target.closest('[data-gfilter]');if(gf){guestFilter=gf.dataset.gfilter;guestShow=100;render();return}
@@ -1472,6 +1533,7 @@ document.addEventListener('click',async e=>{
   else if(act==='drive')driveManual();
   else if(act==='meet'){openSheet('meetings');const sel=$('#f_venueId');if(sel)sel.value=a.dataset.id}
   else if(act==='q')openQ(a.dataset.id)
+  else if(act==='mytasks'){taskFilter=meKey()?'mine':'open';tab='tasks';render();scrollTo(0,0)}
   else if(act==='daytpl'){if(!db||busy)return;busy=true;a.disabled=true;try{let i=0;for(const [time,title] of DAY_TEMPLATE)await db.collection('timeline').add({time,title,vendorId:'',place:'',note:'',createdAt:Date.now()+(i++)});logAct('נטען לו״ז לדוגמה ליום החתונה');toast('נטען לו״ז לדוגמה. מעדכנים שעות לפי האולם.')}catch(err){toast(errMsg(err))}finally{busy=false}}
   else if(act==='daycopy'){const txt=dayText();try{await navigator.clipboard.writeText(txt);toast('הלו״ז הועתק')}catch(_){toast('לא הצלחתי להעתיק')}}
   else if(act==='vadd'){openSheet('vendors');const sel=$('#f_type');if(sel)sel.value=a.dataset.type}
