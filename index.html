@@ -204,6 +204,16 @@ body{margin:0}
 .gate-card img{width:96px;height:96px;border-radius:22px}
 .gbtn{display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-weight:600;font-size:1rem;cursor:pointer}
 .gbtn svg{width:20px;height:20px}
+.heb{font-size:.82rem;color:var(--muted);display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:1.2em}
+.heb .pill{font-size:.75rem}
+.qsec{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--surface)}
+.qsec summary{cursor:pointer;font-weight:600;padding:4px 0}
+.qsec[open] summary{margin-bottom:8px}
+.qsec .field{margin-bottom:10px}
+.qsec textarea{min-height:44px}
+.qsave{font-size:.8rem;color:var(--muted)}
+.ans td{white-space:normal;min-width:160px;vertical-align:top}
+.ans td.q{min-width:200px;font-weight:600}
 .me{display:flex;align-items:center;gap:8px;padding:8px 14px;color:var(--muted);font-size:.88rem;overflow-wrap:anywhere}
 </style>
 </head>
@@ -272,9 +282,9 @@ const COLLS=['settings','tasks','expenses','guests','vendors','venues','funders'
 let assets=null;
 const ARCH={};
 const ARCHIVABLE=['tasks','expenses','guests','vendors','venues','funders','gifts','meetings'];
-let vendorType='all';
+let vendorType='all',costN=0,qSec=0;
 let venueView='cards',guestShow=100,giftFilter='all',giftQ='',saveAgain=false;
-try{const vv=localStorage.getItem('wed-vview');if(vv==='table'||vv==='cards')venueView=vv}catch(e){}
+try{const vv=localStorage.getItem('wed-vview');if(vv==='table'||vv==='cards'||vv==='answers')venueView=vv}catch(e){}
 const loaded={},seen={};
 let dbState='pending';
 let db=null,canWrite=true,tab='overview',taskFilter='open',guestFilter='all',guestQ='',venueFilter='active',venueRegion='all';
@@ -383,6 +393,8 @@ const SCH={
     {k:'capMax',l:'קיבולת מקסימלית',t:'number'},
     {k:'chuppah',l:'רחבת חופה נפרדת',t:'select',o:()=>YESNO,d:'unknown'},
     {k:'priceEst',l:'מחיר למנה – הערכה',t:'text'},
+    {k:'extraPerPlate',l:'תוספת למנה (מהדרין, מע״מ וכו׳)',t:'money'},
+    {k:'extraFixed',l:'תוספות קבועות לאירוע (בר, עיצוב, הגברה)',t:'money'},
     {k:'kashrut',l:'כשרות',t:'text',wide:1},
     {k:'included',l:'מה כלול במחיר',t:'textarea',wide:1},
     {k:'rating',l:'דירוג ממוצע (מתוך 5)',t:'number'},
@@ -402,7 +414,7 @@ const SCH={
   settings:{t:'הגדרות החתונה',f:[
     {k:'n1',l:'שם ראשון',t:'text',d:'רועי'},
     {k:'n2',l:'שם שני',t:'text'},
-    {k:'date',l:'תאריך החתונה',t:'date'},
+    {k:'date',l:'תאריך החתונה',t:'date',wed:1},
     {k:'budget',l:'תקציב כולל',t:'money'},
     {k:'guestEst',l:'מספר אורחים משוער',t:'number'},
     {k:'plate',l:'מחיר למנה באולם',t:'money'},
@@ -553,7 +565,7 @@ function renderHeader(){
   $('#coupleTitle').textContent=S.settings.n2?`${a} & ${b}`:'החתונה שלנו';
   const d=parseD(S.settings.date);
   if(d){const days=Math.round((d-today())/864e5);
-    $('#countdown').innerHTML=days>0?`עוד <b class="num">${days}</b> ימים · ${h(d.toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'long',year:'numeric'}))}`:days===0?'<b>היום!</b> מזל טוב':`התחתנתם לפני ${-days} ימים`;
+    const hi=hebInfo(S.settings.date);$('#countdown').innerHTML=days>0?`עוד <b class="num">${days}</b> ימים · ${h(d.toLocaleDateString('he-IL',{weekday:'long',day:'numeric',month:'long',year:'numeric'}))}${hi?` · ${h(hi.label)}`:''}`:days===0?'<b>היום!</b> מזל טוב':`התחתנתם לפני ${-days} ימים`;
   }else $('#countdown').textContent='עוד לא נקבע תאריך · אפשר לעדכן בהגדרות';
 }
 function addBtn(kind,label){return canWrite?`<button class="btn primary" type="button" data-act="add" data-kind="${kind}">${label}</button>`:''}
@@ -964,9 +976,92 @@ function vVendors(){
 /* keep numeric ranges like 270–540 in reading order inside RTL text */
 function rng(s){return h(s).replace(/(\d[\d,]*)\s*[–-]\s*(\d[\d,]*)/g,'<span dir="ltr" class="num" style="unicode-bidi:isolate">$1–$2</span>')}
 
+/* ---------- Hebrew dates and days people don't marry on ---------- */
+const gem=n=>{if(n===15)return 'ט״ו';if(n===16)return 'ט״ז';const o=['','א','ב','ג','ד','ה','ו','ז','ח','ט'],t=['','י','כ','ל'];const x=t[Math.floor(n/10)]+o[n%10];return x.length>1?x.slice(0,-1)+'״'+x.slice(-1):x+'׳'};
+let hEn=null,hHe=null;try{hEn=new Intl.DateTimeFormat('en-u-ca-hebrew',{day:'numeric',month:'long'});hHe=new Intl.DateTimeFormat('he-u-ca-hebrew',{month:'long'})}catch(_){}
+function hebInfo(iso){
+  const d=iso&&new Date(String(iso).slice(0,10)+'T12:00:00');if(!d||isNaN(d)||!hEn)return null;
+  const p=hEn.formatToParts(d);const day=+((p.find(x=>x.type==='day')||{}).value),m=(p.find(x=>x.type==='month')||{}).value;
+  const label=gem(day)+' ב'+hHe.format(d);const dow=d.getDay();
+  const R=(lvl,note)=>({label,lvl,note});const inR=(mm,a,b)=>m===mm&&day>=a&&day<=b;
+  if(inR('Tishri',1,2))return R('bad','ראש השנה');
+  if(m==='Tishri'&&day===3)return R('bad','צום גדליה');
+  if(inR('Tishri',9,10))return R('bad','יום כיפור');
+  if(inR('Tishri',14,22))return R('bad','סוכות וחול המועד');
+  if(m==='Tevet'&&day===10)return R('bad','עשרה בטבת');
+  if((m==='Adar'||m==='Adar II')&&day===13)return R('warn','תענית אסתר');
+  if((m==='Adar'||m==='Adar II')&&(day===14||day===15))return R('warn','פורים: מתחתנים לעיתים רחוקות');
+  if(inR('Nisan',14,21))return R('bad','פסח וחול המועד');
+  if((m==='Nisan'&&day>=22)||inR('Iyar',1,17))return R('bad','ספירת העומר: לא מתחתנים עד ל״ג בעומר');
+  if(m==='Iyar'&&day===18)return R('ok','ל״ג בעומר: תאריך מבוקש');
+  if(m==='Iyar'||inR('Sivan',1,5))return R('warn','אחרי ל״ג בעומר: מותר ברוב המנהגים, כדאי לוודא עם הרב');
+  if(m==='Sivan'&&day===6)return R('bad','שבועות');
+  if((m==='Tamuz'&&day>=17)||inR('Av',1,9))return R('bad','בין המצרים');
+  if(dow===6)return R('warn','שבת: רק במוצאי שבת');
+  if(dow===5)return R('warn','יום שישי: אירוע צהריים בלבד');
+  return R('ok','');
+}
+function hebHTML(iso,withStatus){const i=hebInfo(iso);if(!i)return '';
+  return `<span>${h(i.label)}</span>${withStatus&&i.lvl!=='ok'?`<span class="pill ${i.lvl==='bad'?'bad':'warn'}">${h(i.note)}</span>`:withStatus&&i.note?`<span class="pill ok">${h(i.note)}</span>`:''}`}
+
+/* ---------- total cost per venue and date ---------- */
+const guestsN=()=>costN||num(S.settings.guestEst)||450;
+function totalFor(v,q,N){const per=num(q.price)+num(v.extraPerPlate);const plates=Math.max(N,num(q.minGuests));return per*plates+num(v.extraFixed)}
+/* cheapest quote, skipping dates people don't marry on when there is another option */
+function bestTotal(v,N){const qs=quotesOf(v);if(!qs.length)return null;const okd=qs.filter(q=>{const i=hebInfo(q.date);return !i||i.lvl!=='bad'});return (okd.length?okd:qs).map(q=>({q,t:totalFor(v,q,N)})).sort((a,b)=>a.t-b.t)[0]}
+
+/* ---------- questions for venue meetings (same list as the doc) ---------- */
+const QSECTIONS=[
+ ['תאריכים פנויים',['אילו תאריכים פנויים במרץ, באפריל ובמאי 2027?','מה פנוי באמצע השבוע, מה בחמישי ומה בשישי בצהריים?','אפשר לשריין תאריך בלי מקדמה, ולכמה זמן?','יש אירוע נוסף במתחם באותו ערב? (חניה, רעש, שירותים)','באיזו שעה מתחילה קבלת הפנים, ועד מתי אפשר להישאר?']],
+ ['מחיר',['מה המחיר למנה באביב, באמצע השבוע? וכמה בחמישי ובשישי בצהריים?','המחיר כולל מע״מ?','מה מינימום המנות, ומתי צריך לתת מספר סופי?','כמה עולה מנת ילד, ומאיזה גיל?','כמה עולות מנות לספקים (צלם, דיג׳יי)?','מה קורה למחיר מעל 500 אורחים? יש הנחה על כמות?','יש הצעה מיוחדת לתאריכים שעוד לא נמכרו?']],
+ ['כשרות',['מי הגוף המשגיח, בשמו?','המהדרין כלול במחיר או בתוספת? כמה למנה?','המטבח כולו באותה כשרות, או שמביאים קייטרינג מבחוץ?','יש משגיח קבוע באירוע? אפשר משגיח פרטי, ובאיזו עלות?','אפשר לקבל צילום של תעודת הכשרות העדכנית?']],
+ ['קיבולת ומבנה המקום',['כמה אורחים בישיבה מלאה לארוחה?','האורחים יושבים בגן, באולם או בשניהם?','יש רחבת חופה נפרדת? איפה, וכמה אנשים עומדים בה?','מה התוכנית אם יורד גשם? יש קירוי או אוהל, ובתשלום?','מה גודל הרחבה, ויש אפשרות להפרדה?','יש תוכנית קומה של המקום?','יש מרחב מוגן במקום?']],
+ ['מה כלול במחיר',['עיצוב: מה בסיסי, ומה עולה בנפרד?','הגברה ותאורה: כלול או שמביאים ספק?','בר: מה כלול, ומה בתוספת?','קבלת פנים: כמה עמדות וכמה זמן?','יש סוויטת התארגנות לחתן ולכלה?','חובה לעבוד עם ספקים של המקום? ספק חיצוני בתוספת?','שירותים, מיזוג וניקיון: כלול?']],
+ ['אוכל ושירות',['יש טעימות? כמה אנשים, ובתשלום?','אפשר תפריט לדוגמה? כמה מנות עיקריות לבחירה?','מה היחס של מלצרים לאורחים?','יש מנות צמחוניות, טבעוניות וללא גלוטן, באותו מחיר?','יש מנהל/ת אירוע צמוד/ה מההתחלה עד הערב?','אפשר לראות אירוע אמיתי לפני חתימה?']],
+ ['לוגיסטיקה',['כמה מקומות חניה, והאם בחינם?','המקום נגיש לכיסאות גלגלים ולמבוגרים, כולל שירותים?','יש מקום לאוטובוסים לעצור ולהוריד נוסעים?','מה השעה האחרונה של מוזיקה? יש מגבלת רעש?','יש תחבורה ציבורית קרובה?']],
+ ['חוזה ותשלומים',['כמה מקדמה בחתימה, ומה לוח התשלומים?','באיזה אמצעי תשלום? אפשר תשלומים?','מה משלמים בערב האירוע עצמו?','מה תנאי הביטול, כולל מצב ביטחוני או הנחיות פיקוד העורף?','המחיר נעול בחוזה או צמוד למדד?','אפשר טיוטת חוזה לקריאה לפני שמתחייבים?']],
+].map(([t,q],si)=>({t,q:q.map((text,qi)=>({id:`s${si+1}q${qi+1}`,text}))}));
+const QTOTAL=QSECTIONS.reduce((a,s)=>a+s.q.length,0);
+const answersOf=v=>v.answers&&typeof v.answers==='object'?v.answers:{};
+const answeredCount=(v,sec)=>(sec?sec.q:QSECTIONS.flatMap(s=>s.q)).filter(q=>String(answersOf(v)[q.id]||'').trim()).length;
+let qTimers={},qPending={};
+function openQ(id){if(!S.venues.find(x=>x.id===id))return;IMP={step:'q',id};$('#imp').hidden=false;renderQ()}
+function renderQ(){
+  const v=S.venues.find(x=>x.id===IMP.id);if(!v)return;const a=answersOf(v);
+  $('#impCard').innerHTML=`<div class="sec-head"><h2 id="impTitle">שאלון – ${h(v.name)}</h2><button type="button" class="btn small" data-iclose="1">סגירה</button></div>
+    <p class="hint" style="margin:0">התשובות נשמרות לבד תוך כדי כתיבה, ושניכם רואים אותן. <span id="qCount" class="num">${answeredCount(v)}/${QTOTAL}</span> נענו. <span id="qSave" class="qsave" role="status"></span></p>
+    ${QSECTIONS.map((sec,si)=>`<details class="qsec" ${si===0?'open':''}><summary>${si+1}. ${h(sec.t)} <span class="hint num" style="margin:0;font-weight:400">(${answeredCount(v,sec)}/${sec.q.length})</span></summary>
+      ${sec.q.map(q=>`<label class="field" for="qa_${q.id}"><span>${h(q.text)}</span><textarea id="qa_${q.id}" data-qa="${q.id}" rows="2" ${canWrite?'':'readonly'}>${h(a[q.id]||'')}</textarea></label>`).join('')}</details>`).join('')}
+    <div class="sheet-actions"><button type="button" class="btn primary" data-iclose="1">סיום</button></div>`;
+}
+async function saveAnswer(vid,qid,val){
+  const el=$('#qSave');if(el)el.textContent='שומר…';
+  try{await db.doc('venues/'+vid).update({['answers.'+qid]:val,updatedAt:Date.now()});if(el)el.textContent='נשמר'}
+  catch(e){if(el)el.textContent=errMsg(e)}
+}
+function flushQ(){Object.keys(qTimers).forEach(k=>{clearTimeout(qTimers[k]);const p=qPending[k];if(p)saveAnswer(p.vid,p.qid,p.val)});qTimers={};qPending={}}
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.dataset&&t.dataset.qa&&IMP&&IMP.step==='q'&&db&&canWrite){
+    const vid=IMP.id,qid=t.dataset.qa,key=vid+'|'+qid;qPending[key]={vid,qid,val:t.value};clearTimeout(qTimers[key]);
+    qTimers[key]=setTimeout(()=>{delete qTimers[key];const p=qPending[key];delete qPending[key];if(p)saveAnswer(p.vid,p.qid,p.val)},700);
+    const c=$('#qCount');if(c)c.textContent=[...document.querySelectorAll('#impCard [data-qa]')].filter(x=>x.value.trim()).length+'/'+QTOTAL;
+  }
+  if(t.matches&&t.matches('#sheet input[type=date]')){const box=t.closest('label,div')&&t.parentElement.querySelector('.heb');if(box)box.innerHTML=hebHTML(t.value,t.dataset.wed==='1')}
+});
+function answersTable(list){
+  const vs=list.filter(v=>answeredCount(v)>0);
+  const sec=QSECTIONS[qSec]||QSECTIONS[0];
+  return `<div class="chips frow">${QSECTIONS.map((s,i)=>`<button class="chip" type="button" data-qsec="${i}" aria-pressed="${i===qSec}">${h(s.t)}</button>`).join('')}</div>
+  ${vs.length?`<div class="list" style="display:grid;gap:10px">${sec.q.map(q=>`<section class="card" style="padding:12px 14px"><b>${h(q.text)}</b>
+      <ul class="lines" style="margin-top:6px">${vs.map(v=>{const x=String(answersOf(v)[q.id]||'').trim();return `<li style="align-items:flex-start"><span style="flex:none;color:var(--muted)">${h(v.name)}</span><span style="text-align:end;overflow-wrap:anywhere">${x?h(x):'<span class="hint" style="margin:0">–</span>'}</span></li>`}).join('')}</ul></section>`).join('')}</div>
+    <p class="hint">מוצגים רק אולמות שיש להם תשובות. ממלאים דרך "שאלון" בכרטיס האולם.</p>`
+  :'<p class="hint">עוד אין תשובות. בפגישה פותחים "שאלון" בכרטיס האולם וכותבים תוך כדי שיחה.</p>'}`;
+}
+
 /* ---------- venue quotes by date ---------- */
 const quotesOf=v=>Array.isArray(v.quotes)?v.quotes.filter(q=>num(q.price)>0):[];
-function bestQuote(v){const q=quotesOf(v).slice().sort((a,b)=>num(a.price)-num(b.price))[0];return q||(num(v.priceQuote)?{price:num(v.priceQuote),date:''}:null)}
+function bestQuote(v){const all=quotesOf(v),okd=all.filter(q=>{const i=hebInfo(q.date);return !i||i.lvl!=='bad'});const q=(okd.length?okd:all).slice().sort((a,b)=>num(a.price)-num(b.price))[0];return q||(num(v.priceQuote)?{price:num(v.priceQuote),date:''}:null)}
 const fdShort=s=>{const d=parseD(s);return d?d.toLocaleDateString('he-IL',{weekday:'short',day:'numeric',month:'numeric',year:'2-digit'}):''};
 
 /* ---------- meetings + Google Calendar ----------
@@ -1049,8 +1144,9 @@ function vVenues(){
   ${S.venues.length?`
   <div class="chips frow">${sFilters.map(([k,l])=>`<button class="chip" type="button" data-vfilter="${k}" aria-pressed="${k===venueFilter}">${h(l)}</button>`).join('')}</div>
   ${regions.length>2?`<div class="chips frow">${regions.map(([k,l])=>`<button class="chip" type="button" data-vregion="${h(k)}" aria-pressed="${k===venueRegion}">${h(l)}</button>`).join('')}</div>`:''}
-  <div class="chips frow"><button class="chip" type="button" data-vview="cards" aria-pressed="${venueView==='cards'}">כרטיסים</button><button class="chip" type="button" data-vview="table" aria-pressed="${venueView==='table'}">טבלת השוואה</button></div>
-  ${list.length?(venueView==='table'?venueTable(list,need):`<div class="vgrid">${list.map(v=>{
+  <div class="chips frow"><button class="chip" type="button" data-vview="cards" aria-pressed="${venueView==='cards'}">כרטיסים</button><button class="chip" type="button" data-vview="table" aria-pressed="${venueView==='table'}">טבלת השוואה</button><button class="chip" type="button" data-vview="answers" aria-pressed="${venueView==='answers'}">תשובות מהשאלון</button></div>
+  ${S.venues.some(v=>quotesOf(v).length)&&venueView!=='answers'?`<div class="chips frow" style="align-items:center"><span class="hint" style="margin:0;flex:none">עלות משוערת ל-</span>${[...new Set([400,num(S.settings.guestEst)||450,500,600])].sort((a,b)=>a-b).map(n=>`<button class="chip num" type="button" data-costn="${n}" aria-pressed="${guestsN()===n}">${n}</button>`).join('')}<span class="hint" style="margin:0;flex:none">אורחים</span></div>`:''}
+  ${list.length?(venueView==='answers'?answersTable(list):venueView==='table'?venueTable(list,need):`<div class="vgrid">${list.map(v=>{
     const st=v.status||'check';const cls={quote:'gold',visited:'ok',tour:'acc',check:'',out:'bad'}[st];
     const small=num(v.capMax)&&num(v.capMax)<need;
     const url=safeUrl(v.link);
@@ -1060,12 +1156,13 @@ function vVenues(){
       <ul class="lines num" style="margin:0">
         <li><span>קיבולת</span><span>${num(v.capMax)?`עד ${num(v.capMax)}${small?' <span class="pill warn">קטן מדי?</span>':''}`:'לא ידוע'}</span></li>
         <li><span>מחיר למנה</span><span>${(()=>{const b=bestQuote(v);return b?`<b>${ils(b.price)}</b>${b.date?` <span class="hint" style="margin:0">(${h(fdShort(b.date))})</span>`:' (הצעה)'}`:v.priceEst?rng(v.priceEst):'לא ידוע'})()}</span></li>
+        ${(()=>{const bt=bestTotal(v,guestsN());return bt?`<li><span>עלות משוערת (${guestsN()})</span><span><b>${ils(bt.t)}</b></span></li>`:''})()}
         <li><span>כשרות</span><span style="text-align:end">${h(v.kashrut||'לא ידוע')}</span></li>
         <li><span>חופה נפרדת</span><span>${yn(v.chuppah)}</span></li>
         <li><span>ביקורות</span><span>${num(v.rating)?`★ ${num(v.rating).toFixed(1)}${num(v.reviews)?` · ${num(v.reviews)} ביקורות`:''}`:'לא נמצא דירוג'}</span></li>
         ${num(v.myScore)?`<li><span>הציון שלנו</span><span><b>${num(v.myScore)}/10</b></span></li>`:''}
       </ul>
-      ${quotesOf(v).length?`<details class="qd"><summary>${quotesOf(v).length} הצעות מחיר לפי תאריך</summary><ul class="upcoming" style="margin:6px 0 0">${quotesOf(v).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(q=>`<li><span class="w num">${h(fdShort(q.date)||'בלי תאריך')}${num(q.minGuests)?` · מינ׳ ${num(q.minGuests)}`:''}${q.note?` · ${h(q.note)}`:''}</span><span class="num"><b>${ils(q.price)}</b></span></li>`).join('')}</ul></details>`:''}
+      ${quotesOf(v).length?`<details class="qd"><summary>${quotesOf(v).length} הצעות מחיר לפי תאריך</summary><ul class="upcoming" style="margin:6px 0 0">${quotesOf(v).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(q=>{const hi=hebInfo(q.date);return `<li style="flex-wrap:wrap"><span class="w num">${h(fdShort(q.date)||'בלי תאריך')}${num(q.minGuests)?` · מינ׳ ${num(q.minGuests)}`:''}${q.note?` · ${h(q.note)}`:''}${hi?`<span class="heb" style="display:flex">${hebHTML(q.date,true)}</span>`:''}</span><span class="num" style="text-align:end"><b>${ils(q.price)}</b><div class="hint num" style="margin:0">סה״כ ${ils(totalFor(v,q,guestsN()))}</div></span></li>`}).join('')}</ul></details>`:''}
       ${meetingLine(v)}
       ${v.included?`<p class="hint" style="margin:0;overflow-wrap:anywhere"><b>כלול:</b> ${h(v.included)}</p>`:''}
       ${v.reviewSummary?`<p class="hint" style="margin:0;overflow-wrap:anywhere">${h(v.reviewSummary)}</p>`:''}
@@ -1074,25 +1171,27 @@ function vVenues(){
       <div class="acts">
         ${canWrite?`<button class="btn small" type="button" data-act="edit" data-kind="venues" data-id="${h(v.id)}">עריכה</button>`:''}
         ${canWrite&&st!=='out'?`<button class="btn small" type="button" data-act="meet" data-id="${h(v.id)}">קביעת פגישה</button>`:''}
+        <button class="btn small" type="button" data-act="q" data-id="${h(v.id)}">שאלון <span class="num">(${answeredCount(v)}/${QTOTAL})</span></button>
         ${url?`<a class="btn small" href="${h(url)}" target="_blank" rel="noopener noreferrer">לאתר</a>`:''}
         ${canWrite&&!linked&&st!=='out'?`<button class="btn small primary" type="button" data-act="v2v" data-id="${h(v.id)}">העבר לספקים</button>`:''}
         ${linked?'<span class="pill ok" style="align-self:center">בספקים</span>':''}
       </div></article>`}).join('')}</div>`):'<p class="hint">אין אולמות בסינון הזה.</p>'}
   ${archiveSection('venues','אולמות')}
-  <p class="hint">מחיר "הערכה" הוא טווח אזורי לפי מחירוני שוק, לפני תוספת מהדרין (בדרך כלל 10%–30%). מחיר "הצעה" הוא מה שקיבלתם מהמקום. התראת "קטן מדי?" משווה לקיבולת של ${need} אורחים${num(S.settings.guestEst)?' לפי ההגדרות':''}.</p>`
+  <p class="hint">"עלות משוערת" = (מחיר למנה + תוספת למנה) × מספר האורחים (או המינימום, הגבוה מביניהם) + תוספות קבועות. את התוספות מעדכנים בעריכת האולם. מחיר "הערכה" הוא טווח אזורי לפי מחירוני שוק, לפני תוספת מהדרין (בדרך כלל 10%–30%). מחיר "הצעה" הוא מה שקיבלתם מהמקום. התראת "קטן מדי?" משווה לקיבולת של ${need} אורחים${num(S.settings.guestEst)?' לפי ההגדרות':''}.</p>`
   :empty('עוד אין אולמות','אפשר לבקש מ-Claude בצ\'אט חיפוש לפי הקריטריונים שלכם והתוצאות ייטענו לכאן, או להוסיף מקום שמצאתם בעצמכם.','venues','אולם חדש')+archiveSection('venues','אולמות')}`;
 }
 function venueTable(list,need){
   const yn=v=>v==='yes'?'<span class="pill ok">יש</span>':v==='no'?'<span class="pill bad">אין</span>':'<span class="hint" style="margin:0">?</span>';
   const price=v=>{const b=bestQuote(v);if(b)return `<b>${ils(b.price)}</b>${b.date?`<div class="hint num" style="margin:0">${h(fdShort(b.date))}${quotesOf(v).length>1?` · ${quotesOf(v).length} הצעות`:''}</div>`:''}`;return v.priceEst?`<span class="hint" style="margin:0">${rng(v.priceEst.replace(/\s*\(.*\)\s*$/,''))}</span>`:'<span class="hint" style="margin:0">?</span>'};
   return `<div class="tablebox cmp"><table>
-    <thead><tr><th>מקום</th><th>סטטוס</th><th class="n">קיבולת</th><th>מחיר למנה</th><th>כשרות</th><th>חופה נפרדת</th><th class="n">דירוג</th><th class="n">הציון שלנו</th></tr></thead>
+    <thead><tr><th>מקום</th><th>סטטוס</th><th class="n">קיבולת</th><th>מחיר למנה</th><th>עלות משוערת (${guestsN()})</th><th>כשרות</th><th>חופה נפרדת</th><th class="n">דירוג</th><th class="n">הציון שלנו</th></tr></thead>
     <tbody>${list.map(v=>{const st=v.status||'check';const cls={quote:'gold',visited:'ok',tour:'acc',check:'',out:'bad'}[st];const small=num(v.capMax)&&num(v.capMax)<need;
       return `<tr data-act="edit" data-kind="venues" data-id="${h(v.id)}" tabindex="0">
         <td class="name">${h(v.name)}<div class="hint" style="margin:0;font-weight:400">${h([v.type,v.city].filter(Boolean).join(' · '))}</div></td>
         <td><span class="pill ${cls}">${lab(VNSTATUS,st)}</span></td>
         <td class="n">${num(v.capMax)?num(v.capMax):'?'}${small?' <span class="pill warn">קטן</span>':''}</td>
         <td>${price(v)}</td>
+        <td class="num">${(()=>{const bt=bestTotal(v,guestsN());return bt?`<b>${ils(bt.t)}</b>`:'<span class="hint" style="margin:0">?</span>'})()}</td>
         <td style="white-space:normal;min-width:140px">${h(v.kashrut||'?')}</td>
         <td>${yn(v.chuppah)}</td>
         <td class="n">${num(v.rating)?'★ '+num(v.rating).toFixed(1):'?'}</td>
@@ -1117,7 +1216,9 @@ function fieldHTML(f,val){
   else if(f.t==='textarea')inp=`<textarea id="${id}" name="${f.k}" rows="3">${h(v)}</textarea>`;
   else if(f.t==='combo')inp=`<input id="${id}" name="${f.k}" type="text" list="dl_${f.k}" value="${h(v)}" autocomplete="off"><datalist id="dl_${f.k}">${f.o().map(o=>`<option value="${h(o)}"></option>`).join('')}</datalist>`;
   else{const isN=f.t==='money'||f.t==='number';inp=`<input id="${id}" name="${f.k}" type="${isN?'number':f.t}" ${isN?'inputmode="decimal" min="0" step="any"':''} value="${h(isN&&!v?'':v)}" ${f.req?'required':''}>`}
-  return `<label class="field ${f.wide?'wide':''}" for="${id}"><span>${h(f.l)}${f.t==='money'?' (₪)':''}</span>${inp}</label>`;
+  const heb=f.t==='date'?`<span class="heb">${hebHTML(v,!!f.wed)}</span>`:'';
+  if(f.t==='date'&&f.wed)inp=inp.replace('<input ','<input data-wed="1" ');
+  return `<label class="field ${f.wide?'wide':''}" for="${id}"><span>${h(f.l)}${f.t==='money'?' (₪)':''}</span>${inp}${heb}</label>`;
 }
 const ALLCATS=()=>[...ECATS,...XCATS].map(([c])=>c).filter((c,i,a)=>a.indexOf(c)===i);
 function schema(kind){
@@ -1154,7 +1255,7 @@ function renderQuotes(){
   const el=$('#quoteEd');if(!el)return;
   el.innerHTML=`<div class="sec-head"><b>הצעות מחיר לפי תאריך</b><button type="button" class="btn small" data-quote="add">הוספת הצעה</button></div>
   ${quotesDraft.length?quotesDraft.map((q,n)=>`<div data-q="${h(q.id)}" style="display:grid;gap:6px;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:8px;padding:8px">
-    <label class="field"><span>תאריך</span><input id="qd_${n}" data-f="qdate" type="date" value="${h(q.date||'')}"></label>
+    <label class="field"><span>תאריך</span><input id="qd_${n}" data-f="qdate" data-wed="1" type="date" value="${h(q.date||'')}"><span class="heb">${hebHTML(q.date,true)}</span></label>
     <label class="field"><span>מחיר למנה (₪)</span><input id="qp_${n}" data-f="qprice" type="number" inputmode="decimal" min="0" step="any" value="${num(q.price)||''}"></label>
     <label class="field"><span>מינימום מנות</span><input id="qm_${n}" data-f="qmin" type="number" inputmode="numeric" min="0" value="${num(q.minGuests)||''}"></label>
     <label class="field"><span>הערה</span><input id="qn_${n}" data-f="qnote" type="text" value="${h(q.note||'')}"></label>
@@ -1282,6 +1383,8 @@ document.addEventListener('click',async e=>{
   const vt=e.target.closest('[data-vtype]');if(vt){vendorType=vt.dataset.vtype;render();return}
   const vf=e.target.closest('[data-vfilter]');if(vf){venueFilter=vf.dataset.vfilter;render();return}
   const vr=e.target.closest('[data-vregion]');if(vr){venueRegion=vr.dataset.vregion;render();return}
+  const cn=e.target.closest('[data-costn]');if(cn){costN=+cn.dataset.costn;render();return}
+  const qs=e.target.closest('[data-qsec]');if(qs){qSec=+qs.dataset.qsec;render();return}
   const vv=e.target.closest('[data-vview]');if(vv){venueView=vv.dataset.vview;try{localStorage.setItem('wed-vview',venueView)}catch(_){}render();return}
   const a=e.target.closest('[data-act]');if(!a||a.closest('#sheet'))return;
   const act=a.dataset.act;
@@ -1293,6 +1396,7 @@ document.addEventListener('click',async e=>{
   else if(act==='import')openImport();
   else if(act==='drive')driveManual();
   else if(act==='meet'){openSheet('meetings');const sel=$('#f_venueId');if(sel)sel.value=a.dataset.id}
+  else if(act==='q')openQ(a.dataset.id)
   else if(act==='vadd'){openSheet('vendors');const sel=$('#f_type');if(sel)sel.value=a.dataset.type}
   else if(act==='vclose'){
     const v=S.vendors.find(x=>x.id===a.dataset.id);if(!v||!db||busy)return;
@@ -1406,7 +1510,7 @@ function openImport(){
   if(!db){toast('צריך להתחבר כדי לייבא');return}
   IMP={step:'pick'};$('#imp').hidden=false;renderImport();loadXLSX().catch(()=>{});
 }
-function closeImport(){if(IMP&&IMP.step==='run')return;$('#imp').hidden=true;IMP=null}
+function closeImport(){if(IMP&&IMP.step==='run')return;if(IMP&&IMP.step==='q')flushQ();$('#imp').hidden=true;IMP=null}
 function parseWorkbook(wb){
   const sheets=[];
   wb.SheetNames.forEach((sn,si)=>{
