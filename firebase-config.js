@@ -8,5 +8,5 @@ export const firebaseConfig = {
   messagingSenderId: "655285427194",
   appId: "1:655285427194:web:4e6080e61a7d0689386243",
   // Google OAuth web client ID, used for Calendar and Drive access (filled in once it is set up).
-  oauthClientId: ""
+  oauthClientId: "655285427194-4l53upme2krgnuhu3e9a75ekhkf03l8t.apps.googleusercontent.com"
 };
