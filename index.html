@@ -404,8 +404,6 @@ const SCH={
     {k:'capMax',l:'קיבולת מקסימלית',t:'number'},
     {k:'chuppah',l:'רחבת חופה נפרדת',t:'select',o:()=>YESNO,d:'unknown'},
     {k:'priceEst',l:'מחיר למנה – הערכה',t:'text'},
-    {k:'extraPerPlate',l:'תוספת למנה (מהדרין, מע״מ וכו׳)',t:'money'},
-    {k:'extraFixed',l:'תוספות קבועות לאירוע (בר, עיצוב, הגברה)',t:'money'},
     {k:'kashrut',l:'כשרות',t:'text',wide:1},
     {k:'included',l:'מה כלול במחיר',t:'textarea',wide:1},
     {k:'rating',l:'דירוג ממוצע (מתוך 5)',t:'number'},
@@ -427,6 +425,17 @@ const SCH={
     {k:'title',l:'מה קורה',t:'text',req:1,wide:1},
     {k:'vendorId',l:'ספק אחראי',t:'select',o:()=>[['','ללא'],...S.vendors.filter(v=>v.status!=='out').map(v=>[v.id,(v.type?v.type.split(' / ')[0]+' · ':'')+v.name])],d:''},
     {k:'place',l:'איפה',t:'text'},
+    {k:'note',l:'הערות',t:'textarea',wide:1}]},
+  quote:{t:'הצעת מחיר',f:[
+    {k:'date',l:'תאריך',t:'date',wed:1},
+    {k:'dow',l:'יום בשבוע',t:'select',o:()=>[['','בחירה'],...DOWS.map(d=>[d,d])],d:''},
+    {k:'guests',l:'כמות מוזמנים',t:'number'},
+    {k:'price',l:'מחיר למנה',t:'money',req:1},
+    {k:'light',l:'תאורה והגברה',t:'addon'},
+    {k:'design',l:'חבילת עיצוב בסיסית',t:'addon'},
+    {k:'pour',l:'שירותי מזיגה',t:'addon'},
+    {k:'acum',l:'אקו״ם / פדרציה',t:'addon'},
+    {k:'alcohol',l:'תוספת אלכוהול לראש',t:'addon',perHead:1},
     {k:'note',l:'הערות',t:'textarea',wide:1}]},
   settings:{t:'הגדרות החתונה',f:[
     {k:'n1',l:'שם ראשון',t:'text',d:'רועי'},
@@ -1127,16 +1136,51 @@ function hebHTML(iso,withStatus){const i=hebInfo(iso);if(!i)return '';
 
 /* ---------- total cost per venue and date ---------- */
 const guestsN=()=>costN||num(S.settings.guestEst)||450;
-function totalFor(v,q,N){const per=num(q.price)+num(v.extraPerPlate);const plates=Math.max(N,num(q.minGuests));return per*plates+num(v.extraFixed)}
+function totalFor(v,q,N){const plates=Math.max(N||quoteGuests(q),num(q.minGuests));return quotePerHead(v,q)*plates+quoteFixed(v,q)}
 /* cheapest quote, skipping dates people don't marry on when there is another option */
 function bestTotal(v,N){const qs=quotesOf(v);if(!qs.length)return null;const okd=qs.filter(q=>{const i=hebInfo(q.date);return !i||i.lvl!=='bad'});return (okd.length?okd:qs).map(q=>({q,t:totalFor(v,q,N)})).sort((a,b)=>a.t-b.t)[0]}
 
 /* Hebrew date under date fields, updated as the date changes */
-document.addEventListener('input',e=>{const t=e.target;if(t.matches&&t.matches('#sheet input[type=date]')){const box=t.parentElement&&t.parentElement.querySelector('.heb');if(box)box.innerHTML=hebHTML(t.value,t.dataset.wed==='1')}});
+document.addEventListener('input',e=>{const t=e.target;if(t.matches&&t.matches('#sheet input[type=date]')){const box=t.parentElement&&t.parentElement.querySelector('.heb');if(box)box.innerHTML=hebHTML(t.value,t.dataset.wed==='1');
+  const dw=$('#f_dow');const d=parseD(t.value);if(dw&&t.id==='f_date'&&d){dw.value=d.getDay()<6?DOWS[d.getDay()]:''}}});
+document.addEventListener('change',e=>{const t=e.target;if(t.dataset&&t.dataset.inc){const n=$('#f_'+t.dataset.inc);if(n){n.disabled=t.checked;if(t.checked)n.value=''}}});
 
 /* ---------- venue quotes by date ---------- */
 const quotesOf=v=>Array.isArray(v.quotes)?v.quotes.filter(q=>num(q.price)>0):[];
 function bestQuote(v){const all=quotesOf(v),okd=all.filter(q=>{const i=hebInfo(q.date);return !i||i.lvl!=='bad'});const q=(okd.length?okd:all).slice().sort((a,b)=>num(a.price)-num(b.price))[0];return q||(num(v.priceQuote)?{price:num(v.priceQuote),date:''}:null)}
+const DOWS=['ראשון','שני','שלישי','רביעי','חמישי','שישי'];
+const ADDONS=[['light','תאורה והגברה'],['design','עיצוב בסיסי'],['pour','מזיגה'],['acum','אקו״ם']];
+/* quote total = (price per plate + alcohol per head) x guests + fixed add-ons; "included" items cost nothing */
+function quoteGuests(q){return num(q.guests)||guestsN()}
+function quotePerHead(v,q){return num(q.price)+(q.alcoholInc?0:num(q.alcohol))+num(v.extraPerPlate)}
+function quoteFixed(v,q){return ADDONS.reduce((a,[k])=>a+(q[k+'Inc']?0:num(q[k])),0)+num(v.extraFixed)}
+function quoteSummary(q){const inc=[],extra=[];ADDONS.forEach(([k,l])=>{if(q[k+'Inc'])inc.push(l);else if(num(q[k]))extra.push(`${l} ${ils(q[k])}`)});if(q.alcoholInc)inc.push('אלכוהול');else if(num(q.alcohol))extra.push(`אלכוהול ${ils(q.alcohol)} לראש`);return {inc,extra}}
+let quoteVenue='';
+function openQuote(vid,qid){
+  const v=S.venues.find(x=>x.id===vid);if(!v)return;quoteVenue=vid;
+  const q=qid?(Array.isArray(v.quotes)?v.quotes:[]).find(x=>x.id===qid):null;
+  openSheet('quote',q?{...q}:null);
+  $('#sheetTitle').textContent=(q?'עריכת הצעת מחיר':'הצעת מחיר חדשה')+' · '+v.name;
+  if(q){const del=$('#delBtn');del.textContent='מחיקת ההצעה'}
+  if(!q){const g=$('#f_guests');if(g&&!g.value)g.value=num(S.settings.guestEst)||''}
+}
+function venueQuoteFields(list){const all=list.filter(q=>num(q.price)>0),okd=all.filter(q=>{const i=hebInfo(q.date);return !i||i.lvl!=='bad'});const priced=(okd.length?okd:all).sort((a,b)=>num(a.price)-num(b.price));return {quotes:list,priceQuote:priced[0]?num(priced[0].price):0}}
+async function saveQuote(data){
+  const v=S.venues.find(x=>x.id===quoteVenue);if(!v)throw new Error('venue');
+  const list=(Array.isArray(v.quotes)?v.quotes:[]).map(x=>({...x}));
+  if(cur){const i=list.findIndex(x=>x.id===cur.id);const merged={...(i>=0?list[i]:{}),...data,id:cur.id};if(i>=0)list[i]=merged;else list.push(merged)}
+  else list.push({id:'q'+Date.now(),...data});
+  const upd={...venueQuoteFields(list),updatedAt:Date.now()};
+  if(!cur&&['check','tour','visited'].includes(v.status||'check'))upd.status='quote';
+  await db.doc('venues/'+v.id).update(upd);
+  logAct(`${cur?'עודכנה':'נוספה'} הצעת מחיר: ${v.name}${data.date?' · '+fdShort(data.date):''} · ${ils(data.price)} למנה`);
+}
+async function deleteQuote(){
+  const v=S.venues.find(x=>x.id===quoteVenue);if(!v||!cur)return;
+  const list=(Array.isArray(v.quotes)?v.quotes:[]).filter(x=>x.id!==cur.id);
+  await db.doc('venues/'+v.id).update({...venueQuoteFields(list),updatedAt:Date.now()});
+  logAct(`נמחקה הצעת מחיר: ${v.name}`);
+}
 const fdShort=s=>{const d=parseD(s);return d?d.toLocaleDateString('he-IL',{weekday:'short',day:'numeric',month:'numeric',year:'2-digit'}):''};
 
 /* ---------- meetings + Google Calendar ----------
@@ -1237,7 +1281,7 @@ function vVenues(){
         <li><span>ביקורות</span><span>${num(v.rating)?`★ ${num(v.rating).toFixed(1)}${num(v.reviews)?` · ${num(v.reviews)} ביקורות`:''}`:'לא נמצא דירוג'}</span></li>
         ${num(v.myScore)?`<li><span>הציון שלנו</span><span><b>${num(v.myScore)}/10</b></span></li>`:''}
       </ul>
-      ${quotesOf(v).length?`<details class="qd"><summary>${quotesOf(v).length} הצעות מחיר לפי תאריך</summary><ul class="upcoming" style="margin:6px 0 0">${quotesOf(v).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(q=>{const hi=hebInfo(q.date);return `<li style="flex-wrap:wrap"><span class="w num">${h(fdShort(q.date)||'בלי תאריך')}${num(q.minGuests)?` · מינ׳ ${num(q.minGuests)}`:''}${q.note?` · ${h(q.note)}`:''}${hi?`<span class="heb" style="display:flex">${hebHTML(q.date,true)}</span>`:''}</span><span class="num" style="text-align:end"><b>${ils(q.price)}</b><div class="hint num" style="margin:0">סה״כ ${ils(totalFor(v,q,guestsN()))}</div></span></li>`}).join('')}</ul></details>`:''}
+      ${quotesOf(v).length?`<details class="qd" open><summary>${quotesOf(v).length===1?'הצעת מחיר אחת':quotesOf(v).length+' הצעות מחיר'}</summary><ul class="upcoming" style="margin:6px 0 0">${quotesOf(v).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(q=>{const hi=hebInfo(q.date);const sm=quoteSummary(q);return `<li style="flex-wrap:wrap;cursor:pointer" data-act="qedit" data-v="${h(v.id)}" data-q="${h(q.id||'')}"><span class="w num">${h(fdShort(q.date)||'בלי תאריך')}${q.dow&&!q.date?' · '+h(q.dow):''} · ${quoteGuests(q)} מוזמנים${hi?`<span class="heb" style="display:flex">${hebHTML(q.date,true)}</span>`:''}${sm.extra.length?`<span class="hint" style="display:block;margin:0">${h(sm.extra.join(' · '))}</span>`:''}${sm.inc.length?`<span class="hint" style="display:block;margin:0">כלול: ${h(sm.inc.join(', '))}</span>`:''}${q.note?`<span class="hint" style="display:block;margin:0">${h(q.note)}</span>`:''}</span><span class="num" style="text-align:end"><b>${ils(q.price)}</b> למנה<div class="hint num" style="margin:0">סה״כ ${ils(totalFor(v,q,quoteGuests(q)))}</div></span></li>`}).join('')}</ul></details>`:''}
       ${meetingLine(v)}
       ${v.included?`<p class="hint" style="margin:0;overflow-wrap:anywhere"><b>כלול:</b> ${h(v.included)}</p>`:''}
       ${v.reviewSummary?`<p class="hint" style="margin:0;overflow-wrap:anywhere">${h(v.reviewSummary)}</p>`:''}
@@ -1245,13 +1289,14 @@ function vVenues(){
       ${v.phone?`<div class="hint" style="margin:0">טלפון: <span class="sel num">${h(v.phone)}</span></div>`:''}
       <div class="acts">
         ${canWrite?`<button class="btn small" type="button" data-act="edit" data-kind="venues" data-id="${h(v.id)}">עריכה</button>`:''}
+        ${canWrite&&st!=='out'?`<button class="btn small primary" type="button" data-act="qnew" data-id="${h(v.id)}">הצעת מחיר</button>`:''}
         ${canWrite&&st!=='out'?`<button class="btn small" type="button" data-act="meet" data-id="${h(v.id)}">קביעת פגישה</button>`:''}
         ${url?`<a class="btn small" href="${h(url)}" target="_blank" rel="noopener noreferrer">לאתר</a>`:''}
         ${canWrite&&!linked&&st!=='out'?`<button class="btn small primary" type="button" data-act="v2v" data-id="${h(v.id)}">העבר לספקים</button>`:''}
         ${linked?'<span class="pill ok" style="align-self:center">בספקים</span>':''}
       </div></article>`}).join('')}</div>`):'<p class="hint">אין אולמות בסינון הזה.</p>'}
   ${archiveSection('venues','אולמות')}
-  <p class="hint">"עלות משוערת" = (מחיר למנה + תוספת למנה) × מספר האורחים (או המינימום, הגבוה מביניהם) + תוספות קבועות. את התוספות מעדכנים בעריכת האולם. מחיר "הערכה" הוא טווח אזורי לפי מחירוני שוק, לפני תוספת מהדרין (בדרך כלל 10%–30%). מחיר "הצעה" הוא מה שקיבלתם מהמקום. התראת "קטן מדי?" משווה לקיבולת של ${need} אורחים${num(S.settings.guestEst)?' לפי ההגדרות':''}.</p>`
+  <p class="hint">"עלות משוערת" = (מחיר למנה + אלכוהול לראש) × מספר האורחים שנבחר למעלה + תאורה, עיצוב, מזיגה ואקו״ם (מה שלא כלול). כל ההצעות מוזנות מכפתור "הצעת מחיר" בכרטיס. מחיר "הערכה" הוא טווח אזורי לפי מחירוני שוק, לפני תוספת מהדרין (בדרך כלל 10%–30%). מחיר "הצעה" הוא מה שקיבלתם מהמקום. התראת "קטן מדי?" משווה לקיבולת של ${need} אורחים${num(S.settings.guestEst)?' לפי ההגדרות':''}.</p>`
   :empty('עוד אין אולמות','אפשר לבקש מ-Claude בצ\'אט חיפוש לפי הקריטריונים שלכם והתוצאות ייטענו לכאן, או להוסיף מקום שמצאתם בעצמכם.','venues','אולם חדש')+archiveSection('venues','אולמות')}`;
 }
 function venueTable(list,need){
@@ -1288,10 +1333,12 @@ function fieldHTML(f,val){
   const v=val===undefined||val===null||val===''?(f.d??''):val;
   if(f.t==='select'){const opts=f.o();inp=`<select id="${id}" name="${f.k}">${opts.map(([ov,ol])=>`<option value="${h(ov)}" ${ov===v?'selected':''}>${h(ol)}</option>`).join('')}</select>`}
   else if(f.t==='textarea')inp=`<textarea id="${id}" name="${f.k}" rows="3">${h(v)}</textarea>`;
+  else if(f.t==='addon'){const inc=!!(cur&&cur[f.k+'Inc']);inp=`<span style="display:flex;gap:8px;align-items:center"><input id="${id}" name="${f.k}" type="number" inputmode="decimal" min="0" step="any" value="${h(!v?'':v)}" placeholder="${f.perHead?'₪ לאורח':'₪'}" style="flex:1;min-width:0" ${inc?'disabled':''}><label style="display:flex;gap:4px;align-items:center;font-size:.9rem;white-space:nowrap;cursor:pointer"><input type="checkbox" name="${f.k}Inc" data-inc="${f.k}" ${inc?'checked':''}> כלול</label></span>`}
   else if(f.t==='combo')inp=`<input id="${id}" name="${f.k}" type="text" list="dl_${f.k}" value="${h(v)}" autocomplete="off"><datalist id="dl_${f.k}">${f.o().map(o=>`<option value="${h(o)}"></option>`).join('')}</datalist>`;
   else{const isN=f.t==='money'||f.t==='number';inp=`<input id="${id}" name="${f.k}" type="${isN?'number':f.t}" ${isN?'inputmode="decimal" min="0" step="any"':''} value="${h(isN&&!v?'':v)}" ${f.req?'required':''}>`}
   const heb=f.t==='date'?`<span class="heb">${hebHTML(v,!!f.wed)}</span>`:'';
   if(f.t==='date'&&f.wed)inp=inp.replace('<input ','<input data-wed="1" ');
+  if(f.t==='addon')return `<div class="field"><span>${h(f.l)}</span>${inp}</div>`;
   return `<label class="field ${f.wide?'wide':''}" for="${id}"><span>${h(f.l)}${f.t==='money'?' (₪)':''}</span>${inp}${heb}</label>`;
 }
 const ALLCATS=()=>[...ECATS,...XCATS].map(([c])=>c).filter((c,i,a)=>a.indexOf(c)===i);
@@ -1301,7 +1348,7 @@ function schema(kind){
 }
 let instDraft=[],filesDraft=[],quotesDraft=[];
 const hasInst=k=>k==='expenses'||k==='extras';
-const hasQuotes=k=>k==='venues';
+const hasQuotes=k=>false;
 const hasFiles=k=>k==='expenses'||k==='extras'||k==='vendors';
 function syncInst(){
   const rows=[...document.querySelectorAll('#instEd [data-i]')];
@@ -1385,7 +1432,7 @@ $('#againBtn').addEventListener('click',()=>{saveAgain=true});
 $('#sheetForm').addEventListener('submit',async ev=>{
   ev.preventDefault();if(busy||!db)return;
   const sc=schema(curKind),fd=new FormData(ev.target),data={};
-  for(const f of sc.f){const v=fd.get(f.k);data[f.k]=(f.t==='money'||f.t==='number')?num(v):String(v??'').trim()}
+  for(const f of sc.f){const v=fd.get(f.k);if(f.t==='addon'){data[f.k+'Inc']=fd.get(f.k+'Inc')==='on';data[f.k]=data[f.k+'Inc']?0:num(v);continue}data[f.k]=(f.t==='money'||f.t==='number')?num(v):String(v??'').trim()}
   const req=sc.f.find(f=>f.req&&!data[f.k]);
   if(req){const e=$('#sheetErr');e.textContent='צריך למלא: '+req.l;e.hidden=false;return}
   const coll=curKind==='extras'?'expenses':curKind;
@@ -1397,6 +1444,10 @@ $('#sheetForm').addEventListener('submit',async ev=>{
     if(raw.startsWith('vd:')){data.vendorId=raw.slice(3);data.venueId='';const vd=S.vendors.find(x=>x.id===data.vendorId);data.withName=vd?vd.name:'';data.venueName=''}
     else{data.vendorId='';data.withName='';const v=S.venues.find(x=>x.id===raw);data.venueName=v?v.name:''}}
   if(curKind==='gifts'){const g=S.guests.find(x=>x.name.trim()===data.from.trim());data.guestId=g?g.id:''}
+  if(curKind==='quote'){busy=true;$('#saveBtn').disabled=true;
+    try{await saveQuote(data);closeSheet();toast('ההצעה נשמרה')}catch(e){const el=$('#sheetErr');el.textContent=errMsg(e);el.hidden=false}
+    finally{busy=false;$('#saveBtn').disabled=false}
+    return}
   busy=true;$('#saveBtn').disabled=true;
   try{
     if(curKind==='caps'){const caps={};ALLCATS().forEach((c,i)=>{if(num(data['cap'+i]))caps[c]=num(data['cap'+i])});await db.doc('settings/main').set({...S.settings,caps})}
@@ -1424,7 +1475,10 @@ $('#sheetForm').addEventListener('submit',async ev=>{
   finally{busy=false;$('#saveBtn').disabled=false}
 });
 $('#delBtn').addEventListener('click',async()=>{
-  if(busy||!cur)return;busy=true;
+  if(busy||!cur)return;
+  if(curKind==='quote'){const d=$('#delBtn');if(!d.classList.contains('armed')){d.classList.add('armed');d.textContent='ללחוץ שוב למחיקה';return}
+    busy=true;try{await deleteQuote();closeSheet();toast('ההצעה נמחקה')}catch(e){const el=$('#sheetErr');el.textContent=errMsg(e);el.hidden=false}finally{busy=false}return}
+  busy=true;
   const coll=curKind==='extras'?'expenses':curKind;
   try{if(curKind==='meetings')await removeMeetingCal(cur);await db.doc(coll+'/'+cur.id).update({archived:true,archivedAt:Date.now()});logAct('הועבר לארכיון: '+(cur.name||cur.title||cur.from||cur.venueName||cur.withName||''));closeSheet();toast('הועבר לארכיון. אפשר לשחזר מתחתית הרשימה.')}
   catch(e){const el=$('#sheetErr');el.textContent=errMsg(e);el.hidden=false}
@@ -1476,6 +1530,8 @@ document.addEventListener('click',async e=>{
   else if(act==='import')openImport();
   else if(act==='drive')driveManual();
   else if(act==='meet'){openSheet('meetings');const sel=$('#f_venueId');if(sel)sel.value=a.dataset.id}
+  else if(act==='qnew')openQuote(a.dataset.id)
+  else if(act==='qedit'){if(canWrite)openQuote(a.dataset.v,a.dataset.q)}
   else if(act==='mytasks'){taskFilter=meKey()?'mine':'open';tab='tasks';render();scrollTo(0,0)}
   else if(act==='daytpl'){if(!db||busy)return;busy=true;a.disabled=true;try{let i=0;for(const [time,title] of DAY_TEMPLATE)await db.collection('timeline').add({time,title,vendorId:'',place:'',note:'',createdAt:Date.now()+(i++)});logAct('נטען לו״ז לדוגמה ליום החתונה');toast('נטען לו״ז לדוגמה. מעדכנים שעות לפי האולם.')}catch(err){toast(errMsg(err))}finally{busy=false}}
   else if(act==='daycopy'){const txt=dayText();try{await navigator.clipboard.writeText(txt);toast('הלו״ז הועתק')}catch(_){toast('לא הצלחתי להעתיק')}}
