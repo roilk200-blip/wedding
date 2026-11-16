@@ -401,6 +401,8 @@ const SCH={
     {k:'region',l:'אזור',t:'select',o:()=>VNREGION},
     {k:'type',l:'סוג',t:'select',o:()=>VNTYPE},
     {k:'status',l:'סטטוס',t:'select',o:()=>VNSTATUS,d:'check'},
+    {k:'contactName',l:'איש קשר באולם',t:'text'},
+    {k:'contactPhone',l:'טלפון איש הקשר',t:'tel'},
     {k:'capMax',l:'קיבולת מקסימלית',t:'number'},
     {k:'chuppah',l:'רחבת חופה נפרדת',t:'select',o:()=>YESNO,d:'unknown'},
     {k:'priceEst',l:'מחיר למנה – הערכה',t:'text'},
@@ -1207,7 +1209,7 @@ function eventIdOf(r){const p=pj(r);return p.id||p.eventId||(p.event&&p.event.id
 function eventLinkOf(r){const p=pj(r);return p.htmlLink||(p.event&&p.event.htmlLink)||p.link||''}
 function meetingEventInput(m){
   const w=meetWith(m),v=w.v;const st=meetStart(m);const en=new Date(st.getTime()+(num(m.duration)||60)*60e3);
-  const desc=[v.contact?`איש קשר: ${v.contact}`:'',v.phone?`טלפון: ${v.phone}`:'',v.kashrut?`כשרות: ${v.kashrut}`:'',m.note?`לבדוק: ${m.note}`:'',safeUrl(v.link)?`קישור: ${safeUrl(v.link)}`:''].filter(Boolean).join('\n');
+  const desc=[v.contact?`איש קשר: ${v.contact}`:'',v.contactName||v.contactPhone?`איש קשר: ${[v.contactName,v.contactPhone].filter(Boolean).join(' ')}`:'',v.phone?`טלפון: ${v.phone}`:'',v.kashrut?`כשרות: ${v.kashrut}`:'',m.note?`לבדוק: ${m.note}`:'',safeUrl(v.link)?`קישור: ${safeUrl(v.link)}`:''].filter(Boolean).join('\n');
   const title=w.kind==='vendor'?`פגישה עם ${v.type&&v.type!=='אחר'?v.type.split(' / ')[0]+' – ':''}${w.name}`:`פגישה באולם ${w.name}`;
   const inp={summary:`${title} – החתונה של ${names().join(' ו')}`,startTime:localIso(st),endTime:localIso(en),
     description:desc,overrideReminders:[{method:'popup',minutes:1440},{method:'popup',minutes:120}]};
@@ -1286,7 +1288,8 @@ function vVenues(){
       ${v.included?`<p class="hint" style="margin:0;overflow-wrap:anywhere"><b>כלול:</b> ${h(v.included)}</p>`:''}
       ${v.reviewSummary?`<p class="hint" style="margin:0;overflow-wrap:anywhere">${h(v.reviewSummary)}</p>`:''}
       ${v.notes?`<p class="hint" style="margin:0;overflow-wrap:anywhere"><b>רשמים:</b> ${h(v.notes)}</p>`:''}
-      ${v.phone?`<div class="hint" style="margin:0">טלפון: <span class="sel num">${h(v.phone)}</span></div>`:''}
+      ${v.contactName||v.contactPhone?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span><b>איש קשר:</b> ${h(v.contactName||'')}${v.contactPhone?` · <span class="sel num">${h(v.contactPhone)}</span>`:''}</span>${v.contactPhone?`<a class="chip" href="tel:${h(String(v.contactPhone).replace(/[^\d+]/g,''))}">חיוג</a>${waLink(v.contactPhone,'')?`<a class="chip" href="${h(waLink(v.contactPhone,''))}" target="_blank" rel="noopener noreferrer">וואטסאפ</a>`:''}`:''}</div>`:''}
+      ${v.phone?`<div class="hint" style="margin:0">טלפון המקום: <span class="sel num">${h(v.phone)}</span></div>`:''}
       <div class="acts">
         ${canWrite?`<button class="btn small" type="button" data-act="edit" data-kind="venues" data-id="${h(v.id)}">עריכה</button>`:''}
         ${canWrite&&st!=='out'?`<button class="btn small primary" type="button" data-act="qnew" data-id="${h(v.id)}">הצעת מחיר</button>`:''}
@@ -1583,7 +1586,7 @@ document.addEventListener('click',async e=>{
     try{
       const ref=db.collection('vendors').doc();
       const note=[num(v.priceQuote)?`מחיר למנה: ${ils(v.priceQuote)}`:(v.priceEst?`הערכה למנה: ${v.priceEst}`:''),v.kashrut?`כשרות: ${v.kashrut}`:'',v.included?`כלול: ${v.included}`:''].filter(Boolean).join(' · ');
-      await ref.set({name:v.name,type:'אולם / גן אירועים',status:num(v.priceQuote)?'quote':'check',contact:'',phone:v.phone||'',quote:0,deposit:0,note,venueId:v.id,createdAt:Date.now()});
+      await ref.set({name:v.name,type:'אולם / גן אירועים',status:num(v.priceQuote)?'quote':'check',contact:v.contactName||'',phone:v.contactPhone||v.phone||'',quote:0,deposit:0,note,venueId:v.id,createdAt:Date.now()});
       const {id,...rest}=v;await db.doc('venues/'+id).set({...rest,vendorId:ref.id,updatedAt:Date.now()});
       toast('נוסף לספקים');
     }catch(err){toast(errMsg(err))}finally{busy=false}
