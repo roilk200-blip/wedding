@@ -1034,7 +1034,7 @@ async function addVendorExpense(v){
   const side=!!V2X[v.type];
   const ven=v.venueId&&S.venues.find(x=>x.id===v.venueId);const bq=ven&&bestQuote(ven);
   if(bq&&num(bq.price)>0){
-    const e={name:v.name,cat:V2E[v.type]||'אולם וקייטרינג',funder:'',perPlate:num(bq.price)+num(ven.extraPerPlate),minPlates:num(bq.minGuests),plusFixed:num(ven.extraFixed),actual:0,files:v.files||[],note:[bq.date?'הצעה ל-'+fdShort(bq.date):'',v.included?'כלול: '+v.included:''].filter(Boolean).join(' · '),side:false,vendorId:v.id,createdAt:now};
+    const e={name:v.name,cat:V2E[v.type]||'אולם וקייטרינג',funder:'',perPlate:quotePerHead(ven,bq),minPlates:num(bq.minGuests),plusFixed:quoteFixed(ven,bq),actual:0,files:v.files||[],note:[bq.date?'הצעה ל-'+fdShort(bq.date):'',v.included?'כלול: '+v.included:''].filter(Boolean).join(' · '),side:false,vendorId:v.id,createdAt:now};
     e.planned=Math.round(plateCost(e));e.installments=dep?[installments[0]]:[];
     await db.collection('expenses').add(e);return false;
   }
